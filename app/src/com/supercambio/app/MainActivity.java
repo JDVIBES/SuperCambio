@@ -1328,7 +1328,8 @@ public class MainActivity extends Activity {
 
         LinearLayout nextBox;
         TextView nextCountdown, nextStatus, datePill;
-        Button nextBtn, dateAct;
+        Button nextBtn;
+        ImageView dateAct;
         String netErr;
         boolean autoBusy = false;
         long lastAutoTry = 0;
@@ -1487,18 +1488,12 @@ public class MainActivity extends Activity {
             });
             drow.addView(pressScale(datePill), new LinearLayout.LayoutParams(0, dp(48), 1));
 
-            dateAct = new Button(MainActivity.this);
-            dateAct.setText("⟳");
-            dateAct.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-            dateAct.setTextColor(col("text_secondary"));
-            dateAct.setTypeface(TF_MED);
+            dateAct = new ImageView(MainActivity.this);
+            dateAct.setImageResource(R.drawable.ic_refresh);
+            dateAct.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
             dateAct.setBackground(rounded(col("input_bg"), 14));
-            dateAct.setAllCaps(false);
             dateAct.setElevation(0);
-            dateAct.setPadding(0, 0, 0, 0);
-            dateAct.setMinWidth(0);
-            dateAct.setMinimumWidth(0);
-            dateAct.setStateListAnimator(null);
+            dateAct.setPadding(dp(13), dp(13), dp(13), dp(13));
             dateAct.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { fetchNextManual(); }
             });
@@ -1514,7 +1509,7 @@ public class MainActivity extends Activity {
             datePill.setText("Consultando…");
             datePill.setTextColor(col("accent"));
             dateAct.setEnabled(false);
-            dateAct.setText("…");
+            dateAct.setAlpha(0.35f);
             autoFetchNextRate(true);
         }
 
@@ -1532,7 +1527,7 @@ public class MainActivity extends Activity {
                 nextExpanded = false;
                 celebrateUntil = 0;
                 dateAct.setEnabled(true);
-                dateAct.setText("⟳");
+                dateAct.setAlpha(1f);
                 nextBox.animate().alpha(0f).setDuration(200).withEndAction(
                         new Runnable() { public void run() { nextBox.setVisibility(View.GONE); nextBox.setAlpha(1f); } }
                 ).start();
@@ -1587,7 +1582,7 @@ public class MainActivity extends Activity {
             }
             datePill.setText(dstr);
             datePill.setTextColor(col("accent"));
-            dateAct.setTextColor(col("text_secondary"));
+            dateAct.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
             nextCountdown.setTextColor(col("text_primary"));
             nextCountdown.setText(countdownText(diff));
             nextStatus.setText("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).");
@@ -1647,10 +1642,10 @@ public class MainActivity extends Activity {
                                 SimpleDateFormat f = new SimpleDateFormat("HH:mm", new Locale("es"));
                                 nextStatus.setText("El BCV publicó Bs. " + fmt(fRate) + " · detectado a las " + f.format(new Date()) + " (hora del teléfono)");
                                 dateAct.setEnabled(true);
-                                dateAct.setText("⟳");
+                                dateAct.setAlpha(1f);
                             } else {
                                 dateAct.setEnabled(true);
-                                dateAct.setText("⟳");
+                                dateAct.setAlpha(1f);
                                 if (netErr != null) {
                                     nextStatus.setText("Sin conexión con el BCV · revisando cada minuto…");
                                 } else {
