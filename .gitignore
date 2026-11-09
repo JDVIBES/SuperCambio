@@ -1,0 +1,23 @@
+# Build artifacts
+out/
+classes/
+classes.dex
+unsigned.apk
+*.apk.tmp
+
+# Keystore — NUNCA subir (permite firmar actualizaciones de la app)
+*.jks
+*.keystore
+
+# Platform jar descargable
+android-jar/
+
+# Fuentes originales pesadas (los TTFs necesarios están en app/assets/fonts)
+/fonts/
+
+# Generados por aapt
+app/gen/
+app/bin/
+
+# Sesión/local
+.DS_Store

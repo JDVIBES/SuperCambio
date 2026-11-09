@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="page_bg">#F2F2F7</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="text_primary">#000000</color>
+    <color name="text_secondary">#6C6C70</color>
+    <color name="accent">#007AFF</color>
+    <color name="green">#34C759</color>
+    <color name="orange">#FF9500</color>
+    <color name="purple">#AF52DE</color>
+    <color name="red">#FF3B30</color>
+    <color name="separator">#3C3C4324</color>
+    <color name="input_bg">#F2F2F7</color>
+
+    <!-- Paleta clara explícita -->
+    <color name="light_page_bg">#F2F2F7</color>
+    <color name="light_card_bg">#FFFFFF</color>
+    <color name="light_text_primary">#000000</color>
+    <color name="light_text_secondary">#6C6C70</color>
+    <color name="light_accent">#007AFF</color>
+    <color name="light_green">#34C759</color>
+    <color name="light_orange">#FF9500</color>
+    <color name="light_purple">#AF52DE</color>
+    <color name="light_red">#FF3B30</color>
+    <color name="light_separator">#3C3C4324</color>
+    <color name="light_input_bg">#E9E9EE</color>
+
+    <!-- Paleta oscura explícita -->
+    <color name="dark_page_bg">#000000</color>
+    <color name="dark_card_bg">#1C1C1E</color>
+    <color name="dark_text_primary">#FFFFFF</color>
+    <color name="dark_text_secondary">#98989F</color>
+    <color name="dark_accent">#0A84FF</color>
+    <color name="dark_green">#30D158</color>
+    <color name="dark_orange">#FF9F0A</color>
+    <color name="dark_purple">#BF5AF2</color>
+    <color name="dark_red">#FF453A</color>
+    <color name="dark_separator">#54545880</color>
+    <color name="dark_input_bg">#2C2C2E</color>
+</resources>
