@@ -3,9 +3,11 @@ package com.supercambio.app;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -84,6 +86,7 @@ public class MainActivity extends Activity {
 
     private int themeMode = 0; // 0=sistema 1=claro 2=oscuro
     private boolean blurOn = false;
+    private boolean darkLogo = false;
 
     private double bcvUsd, bcvEur, usdt, paralelo;
     private double prevUsd, prevEur, prevUsdt, prevPar;
@@ -108,6 +111,7 @@ public class MainActivity extends Activity {
     private PageConv pageConv;
     private PageProfiles pageProfiles;
     private View aboutPage;
+    private ImageView aboutLogo;
 
     private DecelerateInterpolator decel;
     private OvershootInterpolator pop;
@@ -138,6 +142,7 @@ public class MainActivity extends Activity {
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         themeMode = p.getInt("theme_mode", 0);
         blurOn = p.getBoolean("blur_on", false);
+        darkLogo = p.getBoolean("dark_logo", false);
 
         // Pantallas de alta frecuencia (hasta 120 Hz, mejor esfuerzo)
         try {
@@ -298,6 +303,7 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor e = p.edit();
         e.putInt("theme_mode", themeMode);
         e.putBoolean("blur_on", blurOn);
+        e.putBoolean("dark_logo", darkLogo);
         e.putLong("usd", Double.doubleToRawLongBits(bcvUsd));
         e.putLong("eur", Double.doubleToRawLongBits(bcvEur));
         e.putLong("usdt", Double.doubleToRawLongBits(usdt));
@@ -968,7 +974,7 @@ public class MainActivity extends Activity {
         Path clip = new Path();
         clip.addCircle(cx, cy, r, Path.Direction.CW);
         cv.clipPath(clip);
-        Drawable appIc = getResources().getDrawable(R.mipmap.ic_launcher);
+        Drawable appIc = logoDrawable();
         appIc.setBounds((int) (cx - r), (int) (cy - r), (int) (cx + r), (int) (cy + r));
         appIc.draw(cv);
         cv.restore();
@@ -1078,7 +1084,7 @@ public class MainActivity extends Activity {
         float rad = r * 0.4474f;
         clip.addRoundRect(new RectF(cx - r, cy - r, cx + r, cy + r), rad, rad, Path.Direction.CW);
         cv.clipPath(clip);
-        Drawable appIc = getResources().getDrawable(R.mipmap.ic_launcher);
+        Drawable appIc = logoDrawable();
         appIc.setBounds((int) (cx - r), (int) (cy - r), (int) (cx + r), (int) (cy + r));
         appIc.draw(cv);
         cv.restore();
@@ -2200,30 +2206,16 @@ public class MainActivity extends Activity {
         box.addView(head, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // Logo real de la app, cuadrado con esquinas redondeadas estilo iOS
-        ImageView logo = new ImageView(this);
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        try {
-            int d = dp(72);
-            float rad = d * 0.2237f; // radio de esquina iOS
-            Bitmap lb = Bitmap.createBitmap(d, d, Bitmap.Config.ARGB_8888);
-            Canvas lc = new Canvas(lb);
-            Path cp = new Path();
-            cp.addRoundRect(new RectF(0, 0, d, d), rad, rad, Path.Direction.CW);
-            lc.clipPath(cp);
-            Drawable appIc = getResources().getDrawable(R.mipmap.ic_launcher);
-            appIc.setBounds(0, 0, d, d);
-            appIc.draw(lc);
-            logo.setImageBitmap(lb);
-        } catch (Exception e) {
-            logo.setImageResource(R.mipmap.ic_launcher);
-        }
-        head.addView(logo, new LinearLayout.LayoutParams(dp(72), dp(72)));
+        aboutLogo = new ImageView(this);
+        aboutLogo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        paintAboutLogo();
+        head.addView(aboutLogo, new LinearLayout.LayoutParams(dp(72), dp(72)));
 
         TextView name = tv("Super Cambio", 24, true, col("text_primary"));
         name.setPadding(0, dp(12), 0, 0);
         head.addView(name);
 
-        head.addView(tv("Versión 1.8.1 · Android", 13, false, col("text_secondary")));
+        head.addView(tv("Versión 1.9.0 · Android", 13, false, col("text_secondary")));
         TextView tagline = tv("Tasas de cambio de Venezuela,\nsin anuncios y sin suscripciones.", 14, false, col("text_secondary"));
         tagline.setGravity(Gravity.CENTER);
         tagline.setPadding(0, dp(6), 0, 0);
@@ -2270,6 +2262,38 @@ public class MainActivity extends Activity {
             }
         });
         blurRow.addView(blurSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Logo oscuro de la app
+        LinearLayout logoRow = new LinearLayout(this);
+        logoRow.setOrientation(LinearLayout.HORIZONTAL);
+        logoRow.setGravity(Gravity.CENTER_VERTICAL);
+        logoRow.setPadding(0, dp(12), 0, dp(12));
+        themeCard.addView(logoRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout logoCol = new LinearLayout(this);
+        logoCol.setOrientation(LinearLayout.VERTICAL);
+        logoRow.addView(logoCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        logoCol.addView(tv("Logo oscuro de la app", 15, false, col("text_primary")));
+        logoCol.addView(tv("Cambia el ícono del launcher y el logo interno", 13, false, col("text_secondary")));
+
+        Switch darkLogoSwitch = new Switch(this);
+        darkLogoSwitch.setChecked(darkLogo);
+        try {
+            darkLogoSwitch.setThumbTintList(android.content.res.ColorStateList.valueOf(col("accent")));
+            int[][] dstates = new int[][]{ new int[]{android.R.attr.state_checked}, new int[]{} };
+            int[] dcolors = new int[]{ col("accent"), col("separator") };
+            darkLogoSwitch.setTrackTintList(new android.content.res.ColorStateList(dstates, dcolors));
+        } catch (Exception ignored) { }
+        darkLogoSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                darkLogo = checked;
+                saveAll();
+                applyDarkLauncher();
+                paintAboutLogo();
+                Toast.makeText(MainActivity.this, checked ? "Logo oscuro activado" : "Logo claro activado", Toast.LENGTH_SHORT).show();
+            }
+        });
+        logoRow.addView(darkLogoSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // Créditos
         box.addView(sectionLabel("Créditos"));
@@ -2385,6 +2409,45 @@ public class MainActivity extends Activity {
             col.addView(s);
         }
         return row;
+    }
+
+    private void paintAboutLogo() {
+        try {
+            int d = dp(72);
+            float rad = d * 0.2237f; // radio de esquina iOS
+            Bitmap lb = Bitmap.createBitmap(d, d, Bitmap.Config.ARGB_8888);
+            Canvas lc = new Canvas(lb);
+            Path cp = new Path();
+            cp.addRoundRect(new RectF(0, 0, d, d), rad, rad, Path.Direction.CW);
+            lc.clipPath(cp);
+            Drawable appIc = logoDrawable();
+            appIc.setBounds(0, 0, d, d);
+            appIc.draw(lc);
+            aboutLogo.setImageBitmap(lb);
+        } catch (Exception e) {
+            aboutLogo.setImageResource(darkLogo ? R.drawable.ic_launcher_dark : R.mipmap.ic_launcher);
+        }
+    }
+
+    private Drawable logoDrawable() {
+        return getResources().getDrawable(darkLogo ? R.drawable.ic_launcher_dark : R.mipmap.ic_launcher);
+    }
+
+    // Cambia el ícono del launcher usando activity-alias (sin matar la app)
+    private void applyDarkLauncher() {
+        try {
+            PackageManager pm = getPackageManager();
+            pm.setComponentEnabledSetting(
+                    new ComponentName(this, "com.supercambio.app.LauncherDark"),
+                    darkLogo ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                             : PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP);
+            pm.setComponentEnabledSetting(
+                    new ComponentName(this, "com.supercambio.app.LauncherLight"),
+                    darkLogo ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                             : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
+        } catch (Exception ignored) { }
     }
 
     private void rowRadio(LinearLayout card, String title, boolean selected, final int mode) {
