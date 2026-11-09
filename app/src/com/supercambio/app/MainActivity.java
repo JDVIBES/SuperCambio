@@ -1542,6 +1542,15 @@ public class MainActivity extends Activity {
                             }
                         }
                     } catch (Exception e) { netErr = String.valueOf(e.getMessage()); }
+                    if (newRate <= 0 || newTs <= tUsd) {
+                        double bcv = fetchBcvSite();
+                        long nowMs = System.currentTimeMillis();
+                        if (bcv > 0 && (Math.abs(bcv - bcvUsd) > 0.00001 || computeNextPublish(tUsd) <= nowMs)) {
+                            newRate = bcv;
+                            newTs = nowMs;
+                            netErr = null;
+                        }
+                    }
                     final double fRate = newRate;
                     final long fTs = newTs;
                     ui.post(new Runnable() {
@@ -2282,7 +2291,7 @@ public class MainActivity extends Activity {
         name.setPadding(0, dp(12), 0, 0);
         head.addView(name);
 
-        head.addView(tv("Versión 1.9.8 · Android", 13, false, col("text_secondary")));
+        head.addView(tv("Versión 1.9.9 · Android", 13, false, col("text_secondary")));
         TextView tagline = tv("Tasas de cambio de Venezuela,\nsin anuncios y sin suscripciones.", 14, false, col("text_secondary"));
         tagline.setGravity(Gravity.CENTER);
         tagline.setPadding(0, dp(6), 0, 0);
@@ -2676,6 +2685,19 @@ public class MainActivity extends Activity {
         } finally {
             c.disconnect();
         }
+    }
+
+    private double fetchBcvSite() {
+        try {
+            String html = httpGet("https://www.bcv.org.ve/");
+            String txt = html.replaceAll("<[^>]*>", " ");
+            int i = txt.indexOf("Referencia");
+            if (i < 0) return 0;
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("([0-9]{1,3}(?:\\.[0-9]{3})*,[0-9]{5,})").matcher(txt.substring(i, Math.min(txt.length(), i + 500)));
+            if (!m.find()) return 0;
+            double v = Double.parseDouble(m.group(1).replace(".", "").replace(",", "."));
+            return (v > 1 && v < 1000000) ? v : 0;
+        } catch (Exception e) { return 0; }
     }
 
     private String fmt(double v) {
