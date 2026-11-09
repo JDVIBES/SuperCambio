@@ -2215,7 +2215,7 @@ public class MainActivity extends Activity {
         name.setPadding(0, dp(12), 0, 0);
         head.addView(name);
 
-        head.addView(tv("Versión 1.9.0 · Android", 13, false, col("text_secondary")));
+        head.addView(tv("Versión 1.9.1 · Android", 13, false, col("text_secondary")));
         TextView tagline = tv("Tasas de cambio de Venezuela,\nsin anuncios y sin suscripciones.", 14, false, col("text_secondary"));
         tagline.setGravity(Gravity.CENTER);
         tagline.setPadding(0, dp(6), 0, 0);
@@ -2414,15 +2414,45 @@ public class MainActivity extends Activity {
     private void paintAboutLogo() {
         try {
             int d = dp(72);
-            float rad = d * 0.2237f; // radio de esquina iOS
+            float inset = d * 0.06f;
+            float iw = d - inset * 2;
+            float rad = iw * 0.2237f; // radio de esquina iOS
             Bitmap lb = Bitmap.createBitmap(d, d, Bitmap.Config.ARGB_8888);
             Canvas lc = new Canvas(lb);
-            Path cp = new Path();
-            cp.addRoundRect(new RectF(0, 0, d, d), rad, rad, Path.Direction.CW);
-            lc.clipPath(cp);
+            RectF ir = new RectF(inset, inset, inset + iw, inset + iw);
+
+            // Sombra suave para despegarlo del fondo
+            Paint shP = new Paint(Paint.ANTI_ALIAS_FLAG);
+            shP.setShadowLayer(d * 0.05f, 0, d * 0.035f, isDark() ? 0x66000000 : 0x2E000000);
+            shP.setColor(Color.BLACK);
+            lc.drawRoundRect(ir, rad, rad, shP);
+
+            // Ícono
+            Path clip = new Path();
+            clip.addRoundRect(ir, rad, rad, Path.Direction.CW);
+            lc.save();
+            lc.clipPath(clip);
             Drawable appIc = logoDrawable();
-            appIc.setBounds(0, 0, d, d);
+            appIc.setBounds((int) inset, (int) inset, (int) (inset + iw), (int) (inset + iw));
             appIc.draw(lc);
+
+            // Reflejo de vidrio: degradado diagonal que se desvanece
+            Paint glare = new Paint(Paint.ANTI_ALIAS_FLAG);
+            glare.setShader(new LinearGradient(0, inset, iw * 0.75f, inset + iw * 0.75f,
+                    new int[]{0x33FFFFFF, 0x0AFFFFFF, 0x00FFFFFF},
+                    new float[]{0f, 0.4f, 0.7f}, Shader.TileMode.CLAMP));
+            lc.drawRoundRect(ir, rad, rad, glare);
+            lc.restore();
+
+            // Borde hairline con reflejo (más brillante arriba, como vidrio)
+            Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+            border.setStyle(Paint.Style.STROKE);
+            border.setStrokeWidth(Math.max(2, dp(1)));
+            border.setShader(new LinearGradient(0, inset, 0, inset + iw,
+                    new int[]{0x8CFFFFFF, 0x26FFFFFF, 0x14FFFFFF},
+                    new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
+            lc.drawRoundRect(ir, rad, rad, border);
+
             aboutLogo.setImageBitmap(lb);
         } catch (Exception e) {
             aboutLogo.setImageResource(darkLogo ? R.drawable.ic_launcher_dark : R.mipmap.ic_launcher);
