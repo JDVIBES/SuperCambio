@@ -1496,10 +1496,15 @@ public class MainActivity extends Activity {
             dateAct.setAllCaps(false);
             dateAct.setElevation(0);
             dateAct.setPadding(0, 0, 0, 0);
+            dateAct.setMinWidth(0);
+            dateAct.setMinimumWidth(0);
+            dateAct.setStateListAnimator(null);
             dateAct.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { fetchNextManual(); }
             });
-            drow.addView(pressScale(dateAct), new LinearLayout.LayoutParams(dp(48), dp(48)));
+            LinearLayout.LayoutParams dalp = new LinearLayout.LayoutParams(dp(48), dp(48));
+            dalp.setMargins(dp(10), 0, 0, 0);
+            drow.addView(pressScale(dateAct), dalp);
         }
 
         private void fetchNextManual() {
