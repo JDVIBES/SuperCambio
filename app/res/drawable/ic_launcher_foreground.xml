@@ -20,23 +20,14 @@
         android:pathData="M74,64 L42,64 M48,56 L40,64 L48,72"/>
     <clip-path android:pathData="M20,0 L88,0 A20,20 0 0 1 108,20 L108,88 A20,20 0 0 1 88,108 L20,108 A20,20 0 0 1 0,88 L0,20 A20,20 0 0 1 20,0 Z"/>
     <path
-        android:fillColor="#30FFFFFF"
-        android:pathData="M0,0 L28,0 L0,28 Z"/>
+        android:fillColor="#3DFFFFFF"
+        android:pathData="M0,0 L108,0 L108,16 L0,16 Z"/>
     <path
-        android:fillColor="#26FFFFFF"
-        android:pathData="M28,0 L56,0 L0,56 L0,28 Z"/>
+        android:fillColor="#2EFFFFFF"
+        android:pathData="M0,16 L108,16 L108,30 L0,30 Z"/>
     <path
-        android:fillColor="#18FFFFFF"
-        android:pathData="M56,0 L84,0 L0,84 L0,56 Z"/>
-    <path
-        android:fillColor="#0CFFFFFF"
-        android:pathData="M84,0 L108,0 L0,108 L0,84 Z"/>
-    <path
-        android:strokeColor="#22FFFFFF"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M2,20 A18,18 0 0 1 20,2 L88,2 A18,18 0 0 1 106,20 L106,88 A18,18 0 0 1 88,106 L20,106 A18,18 0 0 1 2,88 Z"/>
+        android:fillColor="#1AFFFFFF"
+        android:pathData="M0,30 L108,30 L108,44 C78,54 30,54 0,44 Z"/>
     <path
         android:strokeColor="#66FFFFFF"
         android:strokeWidth="4"
