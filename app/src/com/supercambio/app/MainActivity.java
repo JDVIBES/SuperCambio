@@ -79,6 +79,11 @@ import java.util.TimeZone;
 public class MainActivity extends Activity {
 
     private static final String PREFS = "supercambio";
+    private static final String SYNC_KEY = "sc7a9f2d4c8e6b1a3";
+    private static final String SYNC_READ = "https://textdb.online/" + SYNC_KEY + "/data.txt";
+    private static final String SYNC_WRITE = "https://textdb.online/update";
+    private boolean syncBusy = false;
+    private long lastSyncTry = 0;
     private static final String API_USD = "https://ve.dolarapi.com/v1/dolares";
     private static final String API_EUR = "https://ve.dolarapi.com/v1/euros";
     private static final String API_USDT = "https://criptoya.com/api/USDT/VES/1";
@@ -166,6 +171,7 @@ public class MainActivity extends Activity {
         updateAllPages();
         if (dailyNotif) RateAlarm.schedule(this, true);
         refresh();
+        syncSharedHist(false);
     }
 
     private boolean isDark() {
@@ -2558,6 +2564,7 @@ public class MainActivity extends Activity {
         rowCheck(privCard, "Sin suscripciones ni compras");
         rowCheck(privCard, "Sin seguimiento ni analíticas");
         rowCheck(privCard, "Historial guardado solo en tu dispositivo");
+        rowCheck(privCard, "Historial compartido: solo cifras, sin datos personales");
         rowCheck(privCard, "Animaciones fluidas · hasta 120 Hz");
 
         TextView footer = tvIos("© 2026 Jdvibes · Super Cambio\nHecho con ❤️ para Venezuela 🇻🇪", 12, false, col("text_secondary"));
@@ -2827,10 +2834,152 @@ public class MainActivity extends Activity {
                         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
                         if (ok) pageRates.status.setText("✅ Actualizado: " + f.format(new Date()));
                         else pageRates.status.setText("📴 Sin conexión · mostrando últimos datos");
+                        syncSharedHist(false);
                     }
                 });
             }
         }).start();
+    }
+
+    // ===== Historial compartido entre usuarios =====
+    // Solo se comparten los puntos donde la tasa VARÍA (cambia de valor).
+    // Nube pública: textdb.online · sin cuentas · sin datos personales.
+
+    private void syncSharedHist(boolean force) {
+        long now = System.currentTimeMillis();
+        if (syncBusy || (!force && now - lastSyncTry < 900000L)) return;
+        syncBusy = true;
+        lastSyncTry = now;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    String raw = httpGet(SYNC_READ);
+                    JSONObject remote = null;
+                    try { remote = new JSONObject(raw); } catch (Exception e) { remote = new JSONObject(); }
+                    boolean changed = mergeHist(remote.optJSONArray("usd"), histUsd)
+                            | mergeHist(remote.optJSONArray("eur"), histEur)
+                            | mergeHist(remote.optJSONArray("usdt"), histUsdt)
+                            | mergeHist(remote.optJSONArray("par"), histPar);
+                    boolean upload = localNewPoints(remote.optJSONArray("usd"), histUsd)
+                            || localNewPoints(remote.optJSONArray("eur"), histEur)
+                            || localNewPoints(remote.optJSONArray("usdt"), histUsdt)
+                            || localNewPoints(remote.optJSONArray("par"), histPar);
+                    if (changed) {
+                        saveAll();
+                        ui.post(new Runnable() {
+                            public void run() {
+                                if (currentTab == 1 && pageCharts != null) pageCharts.redraw();
+                                RateWidget.push(MainActivity.this);
+                            }
+                        });
+                    }
+                    if (upload) {
+                        JSONObject out = new JSONObject();
+                        out.put("usd", variationHist(histUsd));
+                        out.put("eur", variationHist(histEur));
+                        out.put("usdt", variationHist(histUsdt));
+                        out.put("par", variationHist(histPar));
+                        String body = "key=" + SYNC_KEY + "&value=" + java.net.URLEncoder.encode(out.toString(), "UTF-8");
+                        httpFormPost(SYNC_WRITE, body);
+                    }
+                } catch (Exception ignored) { }
+                syncBusy = false;
+            }
+        }).start();
+    }
+
+    private boolean mergeHist(JSONArray remote, JSONArray local) {
+        if (remote == null || local == null) return false;
+        boolean added = false;
+        try {
+            java.util.TreeMap<Long, Double> map = new java.util.TreeMap<Long, Double>();
+            for (int i = 0; i < local.length(); i++) {
+                JSONObject o = local.getJSONObject(i);
+                map.put(o.getLong("t"), o.getDouble("v"));
+            }
+            for (int i = 0; i < remote.length(); i++) {
+                JSONObject o = remote.getJSONObject(i);
+                long t = o.getLong("t");
+                double v = o.getDouble("v");
+                if (v > 0 && !map.containsKey(t)) {
+                    map.put(t, v);
+                    added = true;
+                }
+            }
+            if (added) {
+                int n = map.size();
+                int skip = Math.max(0, n - 500);
+                JSONArray arr = new JSONArray();
+                int idx = 0;
+                for (java.util.Map.Entry<Long, Double> en : map.entrySet()) {
+                    if (idx++ < skip) continue;
+                    JSONObject np = new JSONObject();
+                    np.put("t", en.getKey());
+                    np.put("v", en.getValue().doubleValue());
+                    arr.put(np);
+                }
+                while (local.length() > 0) local.remove(0);
+                for (int i = 0; i < arr.length(); i++) local.put(arr.getJSONObject(i));
+            }
+        } catch (Exception ignored) { }
+        return added;
+    }
+
+    private boolean localNewPoints(JSONArray remote, JSONArray local) {
+        try {
+            if (local == null || local.length() == 0) return false;
+            if (remote == null || remote.length() == 0) return true;
+            java.util.HashSet<Long> seen = new java.util.HashSet<Long>();
+            for (int i = 0; i < remote.length(); i++) seen.add(remote.getJSONObject(i).getLong("t"));
+            double prev = Double.NaN;
+            for (int i = 0; i < local.length(); i++) {
+                JSONObject o = local.getJSONObject(i);
+                double v = o.getDouble("v");
+                if (i == 0 || v != prev) {
+                    if (!seen.contains(o.getLong("t"))) return true;
+                }
+                prev = v;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
+    private JSONArray variationHist(JSONArray h) {
+        JSONArray out = new JSONArray();
+        try {
+            double prev = Double.NaN;
+            for (int i = 0; i < h.length(); i++) {
+                JSONObject o = h.getJSONObject(i);
+                double v = o.getDouble("v");
+                if (i == 0 || v != prev) {
+                    JSONObject np = new JSONObject();
+                    np.put("t", o.getLong("t"));
+                    np.put("v", v);
+                    out.put(np);
+                }
+                prev = v;
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    private String httpFormPost(String urlStr, String body) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(10000);
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        try {
+            java.io.OutputStream os = c.getOutputStream();
+            os.write(body.getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            os.close();
+        } finally {
+            try { c.getInputStream(); } catch (Exception ignored) { }
+            c.disconnect();
+        }
+        return "";
     }
 
     private String httpGet(String urlStr) throws Exception {
