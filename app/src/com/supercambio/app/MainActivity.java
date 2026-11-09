@@ -1300,8 +1300,8 @@ public class MainActivity extends Activity {
         RateCard usd, eur, usdtc, parc;
 
         LinearLayout nextBox;
-        TextView nextCountdown, nextStatus;
-        Button nextBtn, verBtn;
+        TextView nextCountdown, nextStatus, datePill;
+        Button nextBtn, dateAct;
         boolean autoBusy = false;
         long lastAutoTry = 0;
         long celebrateUntil = 0;
@@ -1405,25 +1405,43 @@ public class MainActivity extends Activity {
             nextStatus.setPadding(0, dp(6), 0, 0);
             nextBox.addView(nextStatus, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            verBtn = new Button(MainActivity.this);
-            verBtn.setText("👁 Ver nueva tasa");
-            verBtn.setTextColor(Color.WHITE);
-            verBtn.setTextSize(14);
-            verBtn.setTypeface(TF_MED);
-            verBtn.setBackground(rounded(col("accent"), 999));
-            verBtn.setAllCaps(false);
-            verBtn.setElevation(0);
-            verBtn.setVisibility(View.GONE);
-            verBtn.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    verBtn.setEnabled(false);
-                    verBtn.setText("Buscando…");
-                    autoFetchNextRate(true);
-                }
+            // Fila estilo iOS: [fecha de la próxima publicación] [acción]
+            LinearLayout drow = new LinearLayout(MainActivity.this);
+            drow.setOrientation(LinearLayout.HORIZONTAL);
+            drow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams drlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            drlp.setMargins(0, dp(14), 0, 0);
+            nextBox.addView(drow, drlp);
+
+            datePill = tv("—", 15, true, col("accent"));
+            datePill.setGravity(Gravity.CENTER);
+            datePill.setBackground(rounded(col("input_bg"), 14));
+            datePill.setPadding(dp(14), 0, dp(14), 0);
+            datePill.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { if (tUsd > 0 && computeNextPublish(tUsd) <= System.currentTimeMillis()) fetchNextManual(); }
             });
-            LinearLayout.LayoutParams vblp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40));
-            vblp.setMargins(0, dp(12), 0, 0);
-            nextBox.addView(pressScale(verBtn), vblp);
+            drow.addView(pressScale(datePill), new LinearLayout.LayoutParams(0, dp(48), 1));
+
+            dateAct = new Button(MainActivity.this);
+            dateAct.setText("⟳");
+            dateAct.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+            dateAct.setTextColor(col("text_secondary"));
+            dateAct.setTypeface(TF_MED);
+            dateAct.setBackground(rounded(col("input_bg"), 14));
+            dateAct.setAllCaps(false);
+            dateAct.setElevation(0);
+            dateAct.setPadding(0, 0, 0, 0);
+            dateAct.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { fetchNextManual(); }
+            });
+            drow.addView(pressScale(dateAct), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        }
+
+        private void fetchNextManual() {
+            if (autoBusy) return;
+            dateAct.setEnabled(false);
+            dateAct.setText("…");
+            autoFetchNextRate(true);
         }
 
         private void toggleNext() {
@@ -1439,7 +1457,8 @@ public class MainActivity extends Activity {
             } else {
                 nextExpanded = false;
                 celebrateUntil = 0;
-                verBtn.setVisibility(View.GONE);
+                dateAct.setEnabled(true);
+                dateAct.setText("⟳");
                 nextBox.animate().alpha(0f).setDuration(200).withEndAction(
                         new Runnable() { public void run() { nextBox.setVisibility(View.GONE); nextBox.setAlpha(1f); } }
                 ).start();
@@ -1473,28 +1492,28 @@ public class MainActivity extends Activity {
             if (last <= 0) {
                 nextCountdown.setText("—");
                 nextCountdown.setTextColor(col("text_primary"));
+                datePill.setText("—");
                 nextStatus.setText("Actualiza para calcular la próxima publicación del BCV.");
                 return;
             }
             long next = computeNextPublish(last);
             long now = System.currentTimeMillis();
             long diff = next - now;
+            SimpleDateFormat df = new SimpleDateFormat("EEEE, dd/MM/yy", new Locale("es", "VE"));
+            String dstr = df.format(new Date(next));
+            dstr = Character.toUpperCase(dstr.charAt(0)) + dstr.substring(1);
             if (diff <= 0) {
                 nextCountdown.setTextColor(col("text_primary"));
                 nextCountdown.setText("¡Atento!");
-                nextStatus.setText("La nueva tasa puede estar disponible desde ahora.");
-                if (verBtn.getVisibility() != View.VISIBLE && !autoBusy) {
-                    verBtn.setEnabled(true);
-                    verBtn.setText("👁 Ver nueva tasa");
-                    verBtn.setVisibility(View.VISIBLE);
-                    verBtn.setAlpha(0f);
-                    verBtn.setScaleX(0.85f);
-                    verBtn.setScaleY(0.85f);
-                    verBtn.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(pop).start();
-                }
-                autoFetchNextRate(false);
+                datePill.setText("👁  Ver nueva tasa");
+                datePill.setTextColor(col("green"));
+                nextStatus.setText("La nueva tasa puede estar vigente desde ahora. Toca para verla.");
+                if (!autoBusy) autoFetchNextRate(false);
                 return;
             }
+            datePill.setText(dstr);
+            datePill.setTextColor(col("accent"));
+            dateAct.setTextColor(col("text_secondary"));
             nextCountdown.setTextColor(col("text_primary"));
             nextCountdown.setText(countdownText(diff));
             nextStatus.setText("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).");
@@ -1526,7 +1545,6 @@ public class MainActivity extends Activity {
                             autoBusy = false;
                             if (!nextExpanded) return;
                             if (fRate > 0 && fTs > tUsd) {
-                                verBtn.setVisibility(View.GONE);
                                 prevUsd = bcvUsd;
                                 bcvUsd = fRate;
                                 tUsd = fTs;
@@ -1543,9 +1561,11 @@ public class MainActivity extends Activity {
                                 nextCountdown.animate().scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(pop).start();
                                 SimpleDateFormat f = new SimpleDateFormat("HH:mm", new Locale("es"));
                                 nextStatus.setText("El BCV publicó Bs. " + fmt(fRate) + " · detectado a las " + f.format(new Date()) + " (hora del teléfono)");
+                                dateAct.setEnabled(true);
+                                dateAct.setText("⟳");
                             } else {
-                                verBtn.setEnabled(true);
-                                verBtn.setText("👁 Ver nueva tasa");
+                                dateAct.setEnabled(true);
+                                dateAct.setText("⟳");
                                 nextStatus.setText("El BCV aún no publica · reintentando cada minuto…");
                             }
                         }
@@ -2248,7 +2268,7 @@ public class MainActivity extends Activity {
         name.setPadding(0, dp(12), 0, 0);
         head.addView(name);
 
-        head.addView(tv("Versión 1.9.6 · Android", 13, false, col("text_secondary")));
+        head.addView(tv("Versión 1.9.7 · Android", 13, false, col("text_secondary")));
         TextView tagline = tv("Tasas de cambio de Venezuela,\nsin anuncios y sin suscripciones.", 14, false, col("text_secondary"));
         tagline.setGravity(Gravity.CENTER);
         tagline.setPadding(0, dp(6), 0, 0);
