@@ -2,6 +2,9 @@ package com.supercambio.app;
 
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.appwidget.AppWidgetManager;
 import android.app.Dialog;
 import android.content.ComponentName;
 import android.content.Context;
@@ -35,6 +38,7 @@ import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -87,6 +91,8 @@ public class MainActivity extends Activity {
     private int themeMode = 0; // 0=sistema 1=claro 2=oscuro
     private boolean blurOn = false;
     private boolean darkLogo = false;
+    private boolean hapticsOn = true;
+    private boolean dailyNotif = false;
 
     private double bcvUsd, bcvEur, usdt, paralelo;
     private double prevUsd, prevEur, prevUsdt, prevPar;
@@ -143,6 +149,8 @@ public class MainActivity extends Activity {
         themeMode = p.getInt("theme_mode", 0);
         blurOn = p.getBoolean("blur_on", false);
         darkLogo = p.getBoolean("dark_logo", false);
+        hapticsOn = p.getBoolean("haptics_on", true);
+        dailyNotif = p.getBoolean("daily_notif", false);
 
         // Pantallas de alta frecuencia (hasta 120 Hz, mejor esfuerzo)
         try {
@@ -156,6 +164,7 @@ public class MainActivity extends Activity {
         buildUi();
         selectTab(0);
         updateAllPages();
+        if (dailyNotif) RateAlarm.schedule(this, true);
         refresh();
     }
 
@@ -304,6 +313,8 @@ public class MainActivity extends Activity {
         e.putInt("theme_mode", themeMode);
         e.putBoolean("blur_on", blurOn);
         e.putBoolean("dark_logo", darkLogo);
+        e.putBoolean("haptics_on", hapticsOn);
+        e.putBoolean("daily_notif", dailyNotif);
         e.putLong("usd", Double.doubleToRawLongBits(bcvUsd));
         e.putLong("eur", Double.doubleToRawLongBits(bcvEur));
         e.putLong("usdt", Double.doubleToRawLongBits(usdt));
@@ -1178,6 +1189,7 @@ public class MainActivity extends Activity {
     private void selectTab(int i) {
         if (i == currentTab) return;
         currentTab = i;
+        haptic(pager.getChildAt(i));
         for (int k = 0; k < 5; k++) {
             pager.getChildAt(k).setVisibility(k == i ? View.VISIBLE : View.GONE);
             boolean on = (k == i);
@@ -1199,6 +1211,7 @@ public class MainActivity extends Activity {
         pageCharts.redraw();
         pageConv.recompute();
         if (pageProfiles != null) pageProfiles.refresh();
+        RateWidget.push(this);
         scheduleBlur();
     }
 
@@ -1354,9 +1367,46 @@ public class MainActivity extends Activity {
             refreshBtn.setBackgroundColor(Color.TRANSPARENT);
             refreshBtn.setTypeface(TF_MED);
             refreshBtn.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) { refresh(); hideKeyboard(v); }
+                public void onClick(View v) { haptic(v); refresh(); hideKeyboard(v); }
             });
             statusRow.addView(refreshBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            // Pull-to-refresh (sin librerías de soporte)
+            final TextView pullHint = tvIos("↓  Desliza para actualizar", 12, false, col("accent"));
+            pullHint.setGravity(Gravity.CENTER);
+            pullHint.setVisibility(View.GONE);
+            LinearLayout.LayoutParams phlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            box.addView(pullHint, 0, phlp);
+            root.setOnTouchListener(new View.OnTouchListener() {
+                float downY = 0;
+                float pull = 0;
+                boolean armed = false;
+                public boolean onTouch(View v, MotionEvent ev) {
+                    int a = ev.getActionMasked();
+                    if (a == MotionEvent.ACTION_DOWN) {
+                        downY = ev.getY();
+                        armed = root.getScrollY() <= 2;
+                    } else if (a == MotionEvent.ACTION_MOVE && armed) {
+                        float dy = ev.getY() - downY;
+                        if (dy > dp(24)) {
+                            pull = Math.min(1f, (dy - dp(24)) / dp(80));
+                            pullHint.setVisibility(View.VISIBLE);
+                            pullHint.setAlpha(pull);
+                            pullHint.setText(pull >= 1f ? "↻  Suelta para actualizar" : "↓  Desliza para actualizar");
+                        }
+                    } else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
+                        final boolean fire = armed && pull >= 1f;
+                        pull = 0;
+                        pullHint.animate().alpha(0f).setDuration(180).withEndAction(new Runnable() {
+                            public void run() {
+                                pullHint.setVisibility(View.GONE);
+                                if (fire) { haptic(root); refresh(); }
+                            }
+                        }).start();
+                    }
+                    return false;
+                }
+            });
 
             usd = new RateCard(box, "Dólar oficial", "BCV", "$", "green");
             eur = new RateCard(box, "Euro oficial", "BCV", "€", "purple");
@@ -1440,6 +1490,7 @@ public class MainActivity extends Activity {
 
         private void fetchNextManual() {
             if (autoBusy) return;
+            haptic(datePill);
             netErr = null;
             datePill.setText("Consultando…");
             datePill.setTextColor(col("accent"));
@@ -1567,6 +1618,7 @@ public class MainActivity extends Activity {
                                 saveAll();
                                 updateAllPages();
                                 celebrateUntil = System.currentTimeMillis() + 10000;
+                                haptic(nextCountdown);
                                 pageRates.nextStatus.setText("🎉 ¡Nueva tasa publicada!");
                                 nextCountdown.setTextColor(col("green"));
                                 nextCountdown.setText("¡Nueva tasa publicada!");
@@ -1625,7 +1677,9 @@ public class MainActivity extends Activity {
         ChartView chart;
         LinearLayout segWrap;
         TextView chartTitle, statMin, statMax, statAvg, statVar, statCount;
+        LinearLayout rangeWrap;
         int sel = 0;
+        int rangeSel = 1;
 
         PageCharts() {
             root = new ScrollView(MainActivity.this);
@@ -1662,6 +1716,27 @@ public class MainActivity extends Activity {
                 pressScale(s);
                 s.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) { sel = idx; redraw(); hideKeyboard(v); }
+                });
+            }
+
+            // Rango de tiempo
+            rangeWrap = new LinearLayout(MainActivity.this);
+            rangeWrap.setOrientation(LinearLayout.HORIZONTAL);
+            rangeWrap.setBackground(rounded(col("input_bg"), 10));
+            rangeWrap.setPadding(dp(3), dp(3), dp(3), dp(3));
+            LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
+            rLp.setMargins(0, dp(10), 0, 0);
+            box.addView(rangeWrap, rLp);
+            String[] rNames = {"7 d", "1 m", "3 m", "Todo"};
+            for (int i = 0; i < 4; i++) {
+                final int ri = i;
+                TextView s = tv(rNames[i], 13, true, col("text_secondary"));
+                s.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
+                rangeWrap.addView(s, slp);
+                pressScale(s);
+                s.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) { rangeSel = ri; redraw(); hideKeyboard(v); }
                 });
             }
 
@@ -1732,6 +1807,17 @@ public class MainActivity extends Activity {
                 }
             }
 
+            for (int i = 0; i < 4; i++) {
+                TextView sv = (TextView) rangeWrap.getChildAt(i);
+                if (i == rangeSel) {
+                    sv.setBackground(rounded(col("card_bg"), 8));
+                    sv.setTextColor(col("text_primary"));
+                } else {
+                    sv.setBackground(null);
+                    sv.setTextColor(col("text_secondary"));
+                }
+            }
+
             JSONArray arr = histSel();
             int n = arr != null ? arr.length() : 0;
             if (n < 2) {
@@ -1742,35 +1828,56 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            float[] vals = new float[n];
-            long[] times = new long[n];
+            long cut = 0;
+            if (rangeSel == 0) cut = System.currentTimeMillis() - 7L * 86400000L;
+            else if (rangeSel == 1) cut = System.currentTimeMillis() - 30L * 86400000L;
+            else if (rangeSel == 2) cut = System.currentTimeMillis() - 90L * 86400000L;
+            java.util.ArrayList<Float> fv = new java.util.ArrayList<Float>();
+            java.util.ArrayList<Long> ft = new java.util.ArrayList<Long>();
             try {
                 for (int i = 0; i < n; i++) {
                     JSONObject o = arr.getJSONObject(i);
-                    vals[i] = (float) o.getDouble("v");
-                    times[i] = o.getLong("t");
+                    long t = o.getLong("t");
+                    if (cut > 0 && t < cut) continue;
+                    fv.add((float) o.getDouble("v"));
+                    ft.add(t);
                 }
             } catch (Exception e) {
                 chart.setData(null, null);
                 chart.invalidate();
                 return;
             }
+            int m = fv.size();
+            if (m < 2) {
+                statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
+                statCount.setText("Sin datos en este rango todavía.");
+                chart.setData(null, null);
+                chart.invalidate();
+                return;
+            }
+            float[] vals = new float[m];
+            long[] times = new long[m];
+            for (int i = 0; i < m; i++) {
+                vals[i] = fv.get(i);
+                times[i] = ft.get(i);
+            }
 
             double min = vals[0], max = vals[0], sum = 0;
-            for (int i = 0; i < n; i++) {
+            for (int i = 0; i < m; i++) {
                 if (vals[i] < min) min = vals[i];
                 if (vals[i] > max) max = vals[i];
                 sum += vals[i];
             }
-            double avg = sum / n;
-            double var = (vals[n - 2] != 0) ? (vals[n - 1] - vals[n - 2]) / vals[n - 2] * 100.0 : 0;
+            double avg = sum / m;
+            double var = (vals[m - 2] != 0) ? (vals[m - 1] - vals[m - 2]) / vals[m - 2] * 100.0 : 0;
 
             statMin.setText(fmt(min));
             statMax.setText(fmt(max));
             statAvg.setText(fmt(avg));
             statVar.setText((var >= 0 ? "▲ " : "▼ ") + String.format(new Locale("es", "VE"), "%.1f %%", Math.abs(var)));
             statVar.setTextColor(var >= 0 ? col("green") : col("red"));
-            statCount.setText(n + " puntos guardados · los datos se registran en cada apertura.");
+            String[] rLbl = {"últimos 7 días", "último mes", "últimos 3 meses", "todo el historial"};
+            statCount.setText(m + " puntos · " + rLbl[rangeSel] + " · los datos se registran en cada apertura.");
             chart.setData(vals, times);
             chart.startReveal();
         }
@@ -2371,6 +2478,63 @@ public class MainActivity extends Activity {
         });
         logoRow.addView(darkLogoSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // Aviso diario de la tasa
+        LinearLayout notifRow = new LinearLayout(this);
+        notifRow.setOrientation(LinearLayout.HORIZONTAL);
+        notifRow.setGravity(Gravity.CENTER_VERTICAL);
+        notifRow.setPadding(0, dp(12), 0, dp(12));
+        themeCard.addView(notifRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout notifCol = new LinearLayout(this);
+        notifCol.setOrientation(LinearLayout.VERTICAL);
+        notifRow.addView(notifCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        notifCol.addView(tv("Aviso diario de la tasa", 15, false, col("text_primary")));
+        notifCol.addView(tv("Todos los días a las 3:35 PM, hora de Venezuela", 13, false, col("text_secondary")));
+        Switch notifSwitch = new Switch(this);
+        notifSwitch.setChecked(dailyNotif);
+        try {
+            notifSwitch.setThumbTintList(android.content.res.ColorStateList.valueOf(col("accent")));
+            int[][] nstates = new int[][]{ new int[]{android.R.attr.state_checked}, new int[]{} };
+            int[] ncolors = new int[]{ col("accent"), col("separator") };
+            notifSwitch.setTrackTintList(new android.content.res.ColorStateList(nstates, ncolors));
+        } catch (Exception ignored) { }
+        notifSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                dailyNotif = checked;
+                saveAll();
+                RateAlarm.schedule(MainActivity.this, checked);
+                Toast.makeText(MainActivity.this, checked ? "Aviso diario activado" : "Aviso diario desactivado", Toast.LENGTH_SHORT).show();
+            }
+        });
+        notifRow.addView(notifSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Vibración al tocar
+        LinearLayout hapRow = new LinearLayout(this);
+        hapRow.setOrientation(LinearLayout.HORIZONTAL);
+        hapRow.setGravity(Gravity.CENTER_VERTICAL);
+        hapRow.setPadding(0, dp(12), 0, dp(12));
+        themeCard.addView(hapRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout hapCol = new LinearLayout(this);
+        hapCol.setOrientation(LinearLayout.VERTICAL);
+        hapRow.addView(hapCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        hapCol.addView(tv("Vibración al tocar", 15, false, col("text_primary")));
+        hapCol.addView(tv("Respuesta táctil sutil en botones y pestañas", 13, false, col("text_secondary")));
+        Switch hapSwitch = new Switch(this);
+        hapSwitch.setChecked(hapticsOn);
+        try {
+            hapSwitch.setThumbTintList(android.content.res.ColorStateList.valueOf(col("accent")));
+            int[][] hstates = new int[][]{ new int[]{android.R.attr.state_checked}, new int[]{} };
+            int[] hcolors = new int[]{ col("accent"), col("separator") };
+            hapSwitch.setTrackTintList(new android.content.res.ColorStateList(hstates, hcolors));
+        } catch (Exception ignored) { }
+        hapSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                hapticsOn = checked;
+                saveAll();
+                Toast.makeText(MainActivity.this, checked ? "Vibración activada" : "Vibración desactivada", Toast.LENGTH_SHORT).show();
+            }
+        });
+        hapRow.addView(hapSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         // Créditos
         box.addView(sectionLabel("Créditos"));
         LinearLayout credCard = card(box);
@@ -2698,6 +2862,12 @@ public class MainActivity extends Activity {
             double v = Double.parseDouble(m.group(1).replace(".", "").replace(",", "."));
             return (v > 1 && v < 1000000) ? v : 0;
         } catch (Exception e) { return 0; }
+    }
+
+    private void haptic(View v) {
+        if (hapticsOn && v != null) {
+            try { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); } catch (Exception ignored) { }
+        }
     }
 
     private String fmt(double v) {
