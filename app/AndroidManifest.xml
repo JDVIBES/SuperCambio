@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.supercambio.app"
-    android:versionCode="33"
-    android:versionName="2.0.0">
+    android:versionCode="34"
+    android:versionName="2.1.0">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="28"/>
 
@@ -50,6 +50,24 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info"/>
+        </receiver>
+        <receiver android:name=".WidgetSingle" android:label="Super Cambio · Mini">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info_single"/>
+        </receiver>
+        <receiver android:name=".WidgetSmall" android:label="Super Cambio · Chico">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info_small"/>
+        </receiver>
+        <receiver android:name=".WidgetLarge" android:label="Super Cambio · Completo">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info_large"/>
         </receiver>
         <receiver android:name=".RateAlarm" android:exported="false"/>
         <receiver android:name=".BootReceiver" android:exported="true">
