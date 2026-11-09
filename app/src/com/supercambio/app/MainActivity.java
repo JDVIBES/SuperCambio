@@ -1302,6 +1302,7 @@ public class MainActivity extends Activity {
         LinearLayout nextBox;
         TextView nextCountdown, nextStatus, datePill;
         Button nextBtn, dateAct;
+        String netErr;
         boolean autoBusy = false;
         long lastAutoTry = 0;
         long celebrateUntil = 0;
@@ -1418,7 +1419,7 @@ public class MainActivity extends Activity {
             datePill.setBackground(rounded(col("input_bg"), 14));
             datePill.setPadding(dp(14), 0, dp(14), 0);
             datePill.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) { if (tUsd > 0 && computeNextPublish(tUsd) <= System.currentTimeMillis()) fetchNextManual(); }
+                public void onClick(View v) { fetchNextManual(); }
             });
             drow.addView(pressScale(datePill), new LinearLayout.LayoutParams(0, dp(48), 1));
 
@@ -1439,6 +1440,9 @@ public class MainActivity extends Activity {
 
         private void fetchNextManual() {
             if (autoBusy) return;
+            netErr = null;
+            datePill.setText("Consultando…");
+            datePill.setTextColor(col("accent"));
             dateAct.setEnabled(false);
             dateAct.setText("…");
             autoFetchNextRate(true);
@@ -1537,12 +1541,13 @@ public class MainActivity extends Activity {
                                 newTs = tsOf(o);
                             }
                         }
-                    } catch (Exception ignored) { }
+                    } catch (Exception e) { netErr = String.valueOf(e.getMessage()); }
                     final double fRate = newRate;
                     final long fTs = newTs;
                     ui.post(new Runnable() {
                         public void run() {
                             autoBusy = false;
+                            netErr = null;
                             if (!nextExpanded) return;
                             if (fRate > 0 && fTs > tUsd) {
                                 prevUsd = bcvUsd;
@@ -1566,7 +1571,16 @@ public class MainActivity extends Activity {
                             } else {
                                 dateAct.setEnabled(true);
                                 dateAct.setText("⟳");
-                                nextStatus.setText("El BCV aún no publica · reintentando cada minuto…");
+                                if (netErr != null) {
+                                    nextStatus.setText("Sin conexión con el BCV · revisando cada minuto…");
+                                } else {
+                                    int dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
+                                    if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) {
+                                        nextStatus.setText("El BCV no publica fines de semana · próxima tasa: lunes a las 3:30 PM");
+                                    } else {
+                                        nextStatus.setText("El BCV aún no publica la nueva tasa · revisando cada minuto…");
+                                    }
+                                }
                             }
                         }
                     });
@@ -2268,7 +2282,7 @@ public class MainActivity extends Activity {
         name.setPadding(0, dp(12), 0, 0);
         head.addView(name);
 
-        head.addView(tv("Versión 1.9.7 · Android", 13, false, col("text_secondary")));
+        head.addView(tv("Versión 1.9.8 · Android", 13, false, col("text_secondary")));
         TextView tagline = tv("Tasas de cambio de Venezuela,\nsin anuncios y sin suscripciones.", 14, false, col("text_secondary"));
         tagline.setGravity(Gravity.CENTER);
         tagline.setPadding(0, dp(6), 0, 0);
