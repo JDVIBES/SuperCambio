@@ -1301,7 +1301,7 @@ public class MainActivity extends Activity {
 
         LinearLayout nextBox;
         TextView nextCountdown, nextStatus;
-        Button nextBtn;
+        Button nextBtn, verBtn;
         boolean autoBusy = false;
         long lastAutoTry = 0;
         long celebrateUntil = 0;
@@ -1404,6 +1404,26 @@ public class MainActivity extends Activity {
             nextStatus.setGravity(Gravity.CENTER);
             nextStatus.setPadding(0, dp(6), 0, 0);
             nextBox.addView(nextStatus, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            verBtn = new Button(MainActivity.this);
+            verBtn.setText("👁 Ver nueva tasa");
+            verBtn.setTextColor(Color.WHITE);
+            verBtn.setTextSize(14);
+            verBtn.setTypeface(TF_MED);
+            verBtn.setBackground(rounded(col("accent"), 999));
+            verBtn.setAllCaps(false);
+            verBtn.setElevation(0);
+            verBtn.setVisibility(View.GONE);
+            verBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    verBtn.setEnabled(false);
+                    verBtn.setText("Buscando…");
+                    autoFetchNextRate(true);
+                }
+            });
+            LinearLayout.LayoutParams vblp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40));
+            vblp.setMargins(0, dp(12), 0, 0);
+            nextBox.addView(pressScale(verBtn), vblp);
         }
 
         private void toggleNext() {
@@ -1419,6 +1439,7 @@ public class MainActivity extends Activity {
             } else {
                 nextExpanded = false;
                 celebrateUntil = 0;
+                verBtn.setVisibility(View.GONE);
                 nextBox.animate().alpha(0f).setDuration(200).withEndAction(
                         new Runnable() { public void run() { nextBox.setVisibility(View.GONE); nextBox.setAlpha(1f); } }
                 ).start();
@@ -1461,8 +1482,17 @@ public class MainActivity extends Activity {
             if (diff <= 0) {
                 nextCountdown.setTextColor(col("text_primary"));
                 nextCountdown.setText("¡Atento!");
-                nextStatus.setText("Buscando la nueva tasa automáticamente…");
-                autoFetchNextRate();
+                nextStatus.setText("La nueva tasa puede estar disponible desde ahora.");
+                if (verBtn.getVisibility() != View.VISIBLE && !autoBusy) {
+                    verBtn.setEnabled(true);
+                    verBtn.setText("👁 Ver nueva tasa");
+                    verBtn.setVisibility(View.VISIBLE);
+                    verBtn.setAlpha(0f);
+                    verBtn.setScaleX(0.85f);
+                    verBtn.setScaleY(0.85f);
+                    verBtn.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).setInterpolator(pop).start();
+                }
+                autoFetchNextRate(false);
                 return;
             }
             nextCountdown.setTextColor(col("text_primary"));
@@ -1470,9 +1500,9 @@ public class MainActivity extends Activity {
             nextStatus.setText("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).");
         }
 
-        private void autoFetchNextRate() {
+        private void autoFetchNextRate(boolean force) {
             long now = System.currentTimeMillis();
-            if (autoBusy || now - lastAutoTry < 60000) return;
+            if (autoBusy || (!force && now - lastAutoTry < 60000)) return;
             autoBusy = true;
             lastAutoTry = now;
             new Thread(new Runnable() {
@@ -1496,6 +1526,7 @@ public class MainActivity extends Activity {
                             autoBusy = false;
                             if (!nextExpanded) return;
                             if (fRate > 0 && fTs > tUsd) {
+                                verBtn.setVisibility(View.GONE);
                                 prevUsd = bcvUsd;
                                 bcvUsd = fRate;
                                 tUsd = fTs;
@@ -1513,6 +1544,8 @@ public class MainActivity extends Activity {
                                 SimpleDateFormat f = new SimpleDateFormat("HH:mm", new Locale("es"));
                                 nextStatus.setText("El BCV publicó Bs. " + fmt(fRate) + " · detectado a las " + f.format(new Date()) + " (hora del teléfono)");
                             } else {
+                                verBtn.setEnabled(true);
+                                verBtn.setText("👁 Ver nueva tasa");
                                 nextStatus.setText("El BCV aún no publica · reintentando cada minuto…");
                             }
                         }
@@ -2215,7 +2248,7 @@ public class MainActivity extends Activity {
         name.setPadding(0, dp(12), 0, 0);
         head.addView(name);
 
-        head.addView(tv("Versión 1.9.5 · Android", 13, false, col("text_secondary")));
+        head.addView(tv("Versión 1.9.6 · Android", 13, false, col("text_secondary")));
         TextView tagline = tv("Tasas de cambio de Venezuela,\nsin anuncios y sin suscripciones.", 14, false, col("text_secondary"));
         tagline.setGravity(Gravity.CENTER);
         tagline.setPadding(0, dp(6), 0, 0);
