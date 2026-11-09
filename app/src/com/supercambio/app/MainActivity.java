@@ -1226,8 +1226,11 @@ public class MainActivity extends Activity {
     private class RateCard {
         LinearLayout card;
         TextView value, date, pill;
+        String cardTitle;
+        String num = "";
 
         RateCard(LinearLayout parent, String title, String source, String badge, final String colorKey) {
+            cardTitle = title;
             card = new LinearLayout(MainActivity.this);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setBackground(rounded(col("card_bg"), 18));
@@ -1265,7 +1268,11 @@ public class MainActivity extends Activity {
 
             value = tv("—", 40, true, col("text_primary"));
             value.setPadding(0, dp(10), 0, 0);
-            card.addView(value, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            value.setClickable(true);
+            value.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { copyClip(cardTitle, num, value); }
+            });
+            card.addView(pressScale(value), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             date = tv("", 13, false, col("text_secondary"));
             card.addView(date, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -1283,6 +1290,7 @@ public class MainActivity extends Activity {
 
         void setValueAnimated(String s) {
             setTextAnimated(value, s);
+            num = s.endsWith(" Bs.") ? s.substring(0, s.length() - 4) : s;
         }
 
         void setPill(double prevV, double v) {
@@ -2161,9 +2169,17 @@ public class MainActivity extends Activity {
             result = tv("—", 24, true, col("text_primary"));
             result.setBackground(rounded(col("input_bg"), 12));
             result.setPadding(dp(14), dp(16), dp(14), dp(16));
+            result.setClickable(true);
+            result.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    String t = result.getText().toString();
+                    if (t.endsWith(" Bs.")) t = t.substring(0, t.length() - 4);
+                    copyClip("Resultado", t, result);
+                }
+            });
             LinearLayout.LayoutParams rslp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             rslp.setMargins(0, dp(8), 0, 0);
-            colTo.addView(result, rslp);
+            colTo.addView(pressScale(result), rslp);
 
             LinearLayout chips = new LinearLayout(MainActivity.this);
             chips.setOrientation(LinearLayout.HORIZONTAL);
@@ -3011,6 +3027,18 @@ public class MainActivity extends Activity {
             double v = Double.parseDouble(m.group(1).replace(".", "").replace(",", "."));
             return (v > 1 && v < 1000000) ? v : 0;
         } catch (Exception e) { return 0; }
+    }
+
+    private void copyClip(String label, String text, View v) {
+        if (text == null || text.length() == 0 || text.equals("—")) return;
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text));
+                haptic(v);
+                Toast.makeText(this, "📋 Copiado: " + text, Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception ignored) { }
     }
 
     private void haptic(View v) {
