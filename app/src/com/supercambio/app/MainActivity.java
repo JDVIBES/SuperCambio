@@ -2215,7 +2215,7 @@ public class MainActivity extends Activity {
         name.setPadding(0, dp(12), 0, 0);
         head.addView(name);
 
-        head.addView(tv("Versión 1.9.1 · Android", 13, false, col("text_secondary")));
+        head.addView(tv("Versión 1.9.2 · Android", 13, false, col("text_secondary")));
         TextView tagline = tv("Tasas de cambio de Venezuela,\nsin anuncios y sin suscripciones.", 14, false, col("text_secondary"));
         tagline.setGravity(Gravity.CENTER);
         tagline.setPadding(0, dp(6), 0, 0);
@@ -2427,7 +2427,7 @@ public class MainActivity extends Activity {
             shP.setColor(Color.BLACK);
             lc.drawRoundRect(ir, rad, rad, shP);
 
-            // Ícono
+            // Ícono (el reflejo de vidrio viene horneado en el drawable)
             Path clip = new Path();
             clip.addRoundRect(ir, rad, rad, Path.Direction.CW);
             lc.save();
@@ -2435,13 +2435,6 @@ public class MainActivity extends Activity {
             Drawable appIc = logoDrawable();
             appIc.setBounds((int) inset, (int) inset, (int) (inset + iw), (int) (inset + iw));
             appIc.draw(lc);
-
-            // Reflejo de vidrio: degradado diagonal que se desvanece
-            Paint glare = new Paint(Paint.ANTI_ALIAS_FLAG);
-            glare.setShader(new LinearGradient(0, inset, iw * 0.75f, inset + iw * 0.75f,
-                    new int[]{0x33FFFFFF, 0x0AFFFFFF, 0x00FFFFFF},
-                    new float[]{0f, 0.4f, 0.7f}, Shader.TileMode.CLAMP));
-            lc.drawRoundRect(ir, rad, rad, glare);
             lc.restore();
 
             // Borde hairline con reflejo (más brillante arriba, como vidrio)
