@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="logo.png" width="110" alt="Logo de Super Cambio"/>
+
 # 💱 Super Cambio
 
 **Tasas de cambio de Venezuela, rápidas y sin anuncios.**
