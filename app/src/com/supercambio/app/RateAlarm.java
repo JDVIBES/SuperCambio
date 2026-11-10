@@ -152,6 +152,7 @@ public class RateAlarm extends BroadcastReceiver {
             String f = o.optString("fechaActualizacion", "");
             if (f.length() >= 19) {
                 SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+                df.setTimeZone(TimeZone.getTimeZone("America/Caracas"));
                 Date d = df.parse(f.substring(0, 19));
                 if (d != null) return d.getTime();
             }

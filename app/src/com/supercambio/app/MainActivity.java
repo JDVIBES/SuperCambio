@@ -216,6 +216,21 @@ public class MainActivity extends Activity {
         }, 1400);
     }
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        nextExpanded = false;
+        if (pageRates != null) pageRates.stopTicking();
+        if (ui != null) { ui.removeCallbacks(blurTick); tickerOn = false; }
+        dismissQuiet(promptDlg); promptDlg = null;
+        dismissQuiet(downloadDlg); downloadDlg = null;
+        closeSheet();
+    }
+
+    private void dismissQuiet(Dialog d) {
+        if (d != null) { try { d.dismiss(); } catch (Exception ignored) { } }
+    }
+
     private boolean isDark() {
         if (themeMode == 2) return true;
         if (themeMode == 1) return false;
@@ -488,6 +503,15 @@ public class MainActivity extends Activity {
             }
             return c.getTimeInMillis();
         }
+    }
+
+    // true si ya pasó la hora de publicación (15:30 VET) en un día hábil
+    private boolean afterBcvSlot() {
+        Calendar c = Calendar.getInstance(TimeZone.getTimeZone("America/Caracas"));
+        int dow = c.get(Calendar.DAY_OF_WEEK);
+        if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) return false;
+        int h = c.get(Calendar.HOUR_OF_DAY), m = c.get(Calendar.MINUTE);
+        return h > 15 || (h == 15 && m >= 30);
     }
 
     private String countdownText(long diff) {
@@ -982,7 +1006,13 @@ public class MainActivity extends Activity {
             JSONArray clean = new JSONArray();
             for (int i = 0; i < a.length(); i++) {
                 JSONObject o = a.optJSONObject(i);
-                if (o != null && o.has("t") && o.has("v")) clean.put(o);
+                if (o == null || !o.has("t") || !o.has("v")) continue;
+                String tk = o.optString("t");
+                boolean known = false;
+                for (int k = 0; k < PAY_TYPES.length; k++) {
+                    if (PAY_TYPES[k][0].equals(tk)) { known = true; break; }
+                }
+                if (known) clean.put(o);
             }
             if (clean.length() == 0) {
                 Toast.makeText(this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
@@ -1308,10 +1338,10 @@ public class MainActivity extends Activity {
         int secCol = dk ? 0xFF98989F : 0xFF8E8E93;
 
         String[][] rows = new String[4][5]; // nombre | valor | color | badge | fuente
-        rows[0] = new String[]{S("Dólar BCV", "BCV Dollar"), fmt(bcvUsd) + " Bs.", "accent", "USD", "BCV"};
-        rows[1] = new String[]{S("Dólar paralelo", "Parallel dollar"), fmt(paralelo) + " Bs.", "green", "USD", S("Promedio", "Average")};
-        rows[2] = new String[]{S("Euro BCV", "BCV Euro"), fmt(bcvEur) + " Bs.", "purple", "EUR", "BCV"};
-        rows[3] = new String[]{"USDT Binance", fmt(usdt) + " Bs.", "orange", "USDT", "P2P"};
+        rows[0] = new String[]{S("Dólar BCV", "BCV Dollar"), bcvUsd > 0 ? fmt(bcvUsd) + " Bs." : "—", "accent", "USD", "BCV"};
+        rows[1] = new String[]{S("Dólar paralelo", "Parallel dollar"), paralelo > 0 ? fmt(paralelo) + " Bs." : "—", "green", "USD", S("Promedio", "Average")};
+        rows[2] = new String[]{S("Euro BCV", "BCV Euro"), bcvEur > 0 ? fmt(bcvEur) + " Bs." : "—", "purple", "EUR", "BCV"};
+        rows[3] = new String[]{"USDT Binance", usdt > 0 ? fmt(usdt) + " Bs." : "—", "orange", "USDT", "P2P"};
 
         int W = 1000, pad = 56, headH = 200, rowH = 122, footH = 130;
         int H = pad + headH + 36 + rowH * 4 + footH;
@@ -1828,7 +1858,7 @@ public class MainActivity extends Activity {
                     if (newRate <= 0 || newTs <= tUsd) {
                         double bcv = fetchBcvSite();
                         long nowMs = System.currentTimeMillis();
-                        if (bcv > 0 && (Math.abs(bcv - bcvUsd) > 0.00001 || computeNextPublish(tUsd) <= nowMs)) {
+                        if (bcv > 0 && (Math.abs(bcv - bcvUsd) > 0.00001 || afterBcvSlot())) {
                             newRate = bcv;
                             newTs = nowMs;
                             netErr = null;
@@ -2212,11 +2242,11 @@ public class MainActivity extends Activity {
                         return true;
                     }
                     if (act == MotionEvent.ACTION_POINTER_UP) {
-                        if (ev.getPointerCount() == 1) {
-                            sX0 = ev.getX(); sY0 = ev.getY(); gPan0 = startF;
-                            pan2 = false; gSpan = -1f; scrub = false; scrubPass = false;
-                            invalidate();
-                        }
+                        // rebaseline SIEMPRE (en POINTER_UP el evento aún cuenta al dedo
+                        // que sube: getPointerCount()==1 nunca ocurre aquí)
+                        sX0 = ev.getX(); sY0 = ev.getY(); gPan0 = startF;
+                        pan2 = false; gSpan = -1f; scrub = false; scrubPass = false;
+                        invalidate();
                         return true;
                     }
                     if (act == MotionEvent.ACTION_MOVE) {
@@ -3338,56 +3368,76 @@ public class MainActivity extends Activity {
     // ================= RED Y REFRESCO =================
 
     private void refresh() {
-        pageRates.status.setText("Actualizando…");
+        pageRates.status.setText(brandSpan(S("Actualizando…", "Updating…")));
         new Thread(new Runnable() {
             public void run() {
-                long nUsd = 0, nEur = 0, nUsdt = 0, nPar = 0;
+                double nUsd = 0, nEur = 0, nUsdt = 0, nPar = 0;
+                long tsUsd = 0, tsEur = 0, tsUsdt = 0, tsPar = 0;
                 try {
                     JSONArray arr = new JSONArray(httpGet(API_USD));
                     for (int i = 0; i < arr.length(); i++) {
                         JSONObject o = arr.getJSONObject(i);
                         String fuente = o.optString("fuente", "");
-                        if ("oficial".equals(fuente)) { bcvUsd = o.getDouble("promedio"); nUsd = tsOf(o); }
-                        else if ("paralelo".equals(fuente)) { paralelo = o.getDouble("promedio"); nPar = tsOf(o); }
+                        if ("oficial".equals(fuente)) { nUsd = o.getDouble("promedio"); tsUsd = tsOf(o); }
+                        else if ("paralelo".equals(fuente)) { nPar = o.getDouble("promedio"); tsPar = tsOf(o); }
                     }
                 } catch (Exception ignored) { }
                 try {
                     JSONArray arr = new JSONArray(httpGet(API_EUR));
                     for (int i = 0; i < arr.length(); i++) {
                         JSONObject o = arr.getJSONObject(i);
-                        if ("oficial".equals(o.optString("fuente", ""))) { bcvEur = o.getDouble("promedio"); nEur = tsOf(o); }
+                        if ("oficial".equals(o.optString("fuente", ""))) { nEur = o.getDouble("promedio"); tsEur = tsOf(o); }
                     }
                 } catch (Exception ignored) { }
                 try {
                     JSONObject c = new JSONObject(httpGet(API_USDT));
                     JSONObject bin = c.getJSONObject("binancep2p");
                     double bid = bin.optDouble("bid", 0);
-                    if (bid > 0) { usdt = bid; nUsdt = bin.optLong("time", 0) * 1000L; }
+                    if (bid > 0) { nUsdt = bid; tsUsdt = bin.optLong("time", 0) * 1000L; }
                 } catch (Exception ignored) { }
 
-                final boolean ok = bcvUsd > 0 || bcvEur > 0 || usdt > 0 || paralelo > 0;
-                if (ok) {
-                    if (nUsd > 0 && prevUsd == 0) prevUsd = bcvUsd;
-                    if (nEur > 0 && prevEur == 0) prevEur = bcvEur;
-                    if (nUsdt > 0 && prevUsdt == 0) prevUsdt = usdt;
-                    if (nPar > 0 && prevPar == 0) prevPar = paralelo;
-                    tUsd = nUsd > 0 ? nUsd : tUsd;
-                    tEur = nEur > 0 ? nEur : tEur;
-                    tUsdt = nUsdt > 0 ? nUsdt : tUsdt;
-                    tPar = nPar > 0 ? nPar : tPar;
-                    seedHistIfEmpty(histUsd, bcvUsd, tUsd);
-                    seedHistIfEmpty(histEur, bcvEur, tEur);
-                    seedHistIfEmpty(histUsdt, usdt, tUsdt);
-                    seedHistIfEmpty(histPar, paralelo, tPar);
-                    appendHist(histUsd, bcvUsd, System.currentTimeMillis());
-                    appendHist(histEur, bcvEur, System.currentTimeMillis());
-                    appendHist(histUsdt, usdt, System.currentTimeMillis());
-                    appendHist(histPar, paralelo, System.currentTimeMillis());
-                    saveAll();
-                }
-
+                final double fUsd = nUsd, fEur = nEur, fUsdt = nUsdt, fPar = nPar;
+                final long fTsUsd = tsUsd, fTsEur = tsEur, fTsUsdt = tsUsdt, fTsPar = tsPar;
+                final boolean ok = nUsd > 0 || nEur > 0 || nUsdt > 0 || nPar > 0;
                 ui.post(new Runnable() {
                     public void run() {
+                        // Aplicar valores NUEVOS en el hilo de UI (antes se mutaban en el
+                        // hilo de fondo: carrera con gráficas/estado y puntos fantasma)
+                        if (fUsd > 0) {
+                            if (fUsd != bcvUsd) prevUsd = bcvUsd;
+                            if (prevUsd == 0) prevUsd = fUsd;
+                            bcvUsd = fUsd;
+                            tUsd = fTsUsd > 0 ? fTsUsd : tUsd;
+                        }
+                        if (fEur > 0) {
+                            if (fEur != bcvEur) prevEur = bcvEur;
+                            if (prevEur == 0) prevEur = fEur;
+                            bcvEur = fEur;
+                            tEur = fTsEur > 0 ? fTsEur : tEur;
+                        }
+                        if (fUsdt > 0) {
+                            if (fUsdt != usdt) prevUsdt = usdt;
+                            if (prevUsdt == 0) prevUsdt = fUsdt;
+                            usdt = fUsdt;
+                            tUsdt = fTsUsdt > 0 ? fTsUsdt : tUsdt;
+                        }
+                        if (fPar > 0) {
+                            if (fPar != paralelo) prevPar = paralelo;
+                            if (prevPar == 0) prevPar = fPar;
+                            paralelo = fPar;
+                            tPar = fTsPar > 0 ? fTsPar : tPar;
+                        }
+                        if (ok) {
+                            seedHistIfEmpty(histUsd, bcvUsd, tUsd);
+                            seedHistIfEmpty(histEur, bcvEur, tEur);
+                            seedHistIfEmpty(histUsdt, usdt, tUsdt);
+                            seedHistIfEmpty(histPar, paralelo, tPar);
+                            appendHist(histUsd, bcvUsd, System.currentTimeMillis());
+                            appendHist(histEur, bcvEur, System.currentTimeMillis());
+                            appendHist(histUsdt, usdt, System.currentTimeMillis());
+                            appendHist(histPar, paralelo, System.currentTimeMillis());
+                            saveAll();
+                        }
                         updateAllPages();
                         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
                         if (ok) pageRates.status.setText(TextUtils.concat(brandSpan(S("✅ Actualizado: ", "✅ Updated: ")), f.format(new Date())));
@@ -3580,6 +3630,7 @@ public class MainActivity extends Activity {
         c.addView(cancel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         d.setContentView(c, new ViewGroup.LayoutParams(dp(330), ViewGroup.LayoutParams.WRAP_CONTENT));
+        d.setCancelable(false); // solo se cierra con el botón Cancelar (evita tocar fuera por accidente)
         Window w = d.getWindow();
         if (w != null) {
             w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
@@ -3777,6 +3828,7 @@ public class MainActivity extends Activity {
             public void run() {
                 String tag = "", url = "", notes = "";
                 long size = 0;
+                boolean fetchOk = false;
                 try {
                     JSONObject r = new JSONObject(httpGet("https://api.github.com/repos/JDVIBES/SuperCambio/releases/latest"));
                     tag = r.optString("tag_name", "").replaceFirst("^v", "");
@@ -3786,13 +3838,22 @@ public class MainActivity extends Activity {
                         url = assets.getJSONObject(0).optString("browser_download_url", "");
                         size = assets.getJSONObject(0).optLong("size", 0);
                     }
+                    fetchOk = true;
                 } catch (Exception ignored) { }
                 final String fTag = tag, fUrl = url, fNotes = notes;
                 final long fSize = size;
+                final boolean fOk = fetchOk;
                 final boolean isNew = fTag.length() > 0 && isNewerVersion(fTag, currentVersionName());
                 ui.post(new Runnable() {
                     public void run() {
                         updBusy = false;
+                        if (!fOk) {
+                            // No tocar prefs ni el estado: la verificación FALLÓ
+                            if (manual) Toast.makeText(MainActivity.this,
+                                    S("📴 Sin conexión · no se pudo buscar actualizaciones", "📴 Offline · couldn't check for updates"),
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
                         SharedPreferences.Editor e = getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
                         e.putLong("upd_last", System.currentTimeMillis());
                         e.putString("upd_tag", isNew ? fTag : "");
@@ -3863,18 +3924,24 @@ public class MainActivity extends Activity {
                     String raw = httpGet(SYNC_READ);
                     JSONObject remote = null;
                     try { remote = new JSONObject(raw); } catch (Exception e) { remote = new JSONObject(); }
-                    boolean changed = mergeHist(remote.optJSONArray("usd"), histUsd)
-                            | mergeHist(remote.optJSONArray("eur"), histEur)
-                            | mergeHist(remote.optJSONArray("usdt"), histUsdt)
-                            | mergeHist(remote.optJSONArray("par"), histPar);
+                    // Fusionar SIN mutar los arrays vivos (los aplica la UI)
+                    final JSONArray mUsd = mergeHist(remote.optJSONArray("usd"), histUsd);
+                    final JSONArray mEur = mergeHist(remote.optJSONArray("eur"), histEur);
+                    final JSONArray mUsdt = mergeHist(remote.optJSONArray("usdt"), histUsdt);
+                    final JSONArray mPar = mergeHist(remote.optJSONArray("par"), histPar);
+                    boolean changed = mUsd != null | mEur != null | mUsdt != null | mPar != null;
                     boolean upload = localNewPoints(remote.optJSONArray("usd"), histUsd)
                             || localNewPoints(remote.optJSONArray("eur"), histEur)
                             || localNewPoints(remote.optJSONArray("usdt"), histUsdt)
                             || localNewPoints(remote.optJSONArray("par"), histPar);
                     if (changed) {
-                        saveAll();
                         ui.post(new Runnable() {
                             public void run() {
+                                if (mUsd != null) histUsd = mUsd;
+                                if (mEur != null) histEur = mEur;
+                                if (mUsdt != null) histUsdt = mUsdt;
+                                if (mPar != null) histPar = mPar;
+                                saveAll();
                                 if (currentTab == 1 && pageCharts != null) pageCharts.redraw();
                                 RateWidget.push(MainActivity.this);
                             }
@@ -3895,15 +3962,18 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private boolean mergeHist(JSONArray remote, JSONArray local) {
-        if (remote == null || local == null) return false;
-        boolean added = false;
+    // Devuelve el array fusionado (local gana conflictos; remoto añade puntos nuevos)
+    // o null si no hay cambios — NO muta el array local.
+    private JSONArray mergeHist(JSONArray remote, JSONArray local) {
+        if (remote == null || local == null) return null;
+        JSONArray res = null;
         try {
             java.util.TreeMap<Long, Double> map = new java.util.TreeMap<Long, Double>();
             for (int i = 0; i < local.length(); i++) {
                 JSONObject o = local.getJSONObject(i);
                 map.put(o.getLong("t"), o.getDouble("v"));
             }
+            boolean added = false;
             for (int i = 0; i < remote.length(); i++) {
                 JSONObject o = remote.getJSONObject(i);
                 long t = o.getLong("t");
@@ -3925,11 +3995,10 @@ public class MainActivity extends Activity {
                     np.put("v", en.getValue().doubleValue());
                     arr.put(np);
                 }
-                while (local.length() > 0) local.remove(0);
-                for (int i = 0; i < arr.length(); i++) local.put(arr.getJSONObject(i));
+                res = arr;
             }
         } catch (Exception ignored) { }
-        return added;
+        return res;
     }
 
     private boolean localNewPoints(JSONArray remote, JSONArray local) {
@@ -3993,7 +4062,7 @@ public class MainActivity extends Activity {
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
         c.setConnectTimeout(10000);
         c.setReadTimeout(10000);
-        c.setRequestProperty("User-Agent", "SuperCambio/1.4 (Android)");
+        c.setRequestProperty("User-Agent", "SuperCambio/" + currentVersionName() + " (Android)");
         c.setRequestProperty("Accept", "application/json");
         try {
             InputStream in = c.getInputStream();
@@ -4113,7 +4182,13 @@ public class MainActivity extends Activity {
     }
 
     private double parseAmount(String s) {
-        try { return Double.parseDouble(s.trim().replace(",", ".")); } catch (Exception e) { return 0; }
+        try {
+            String t = s.trim();
+            if (t.length() == 0) return 0;
+            // Acepta "899,30" y "1.054,60" (miles con punto + decimal con coma)
+            if (t.indexOf(',') >= 0) t = t.replace(".", "").replace(',', '.');
+            return Double.parseDouble(t);
+        } catch (Exception e) { return 0; }
     }
 
     private void hideKeyboard(View v) {
