@@ -35,9 +35,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.TypefaceSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -283,17 +286,64 @@ public class MainActivity extends Activity {
 
     private TextView tv(String text, float sizeSp, boolean bold, int color) {
         TextView t = new TextView(this);
-        t.setText(text);
+        t.setText(brandSpan(text));
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
         t.setTextColor(color);
         t.setTypeface(bold ? TF_BOLD : TF_REG);
         return t;
     }
 
+    // tvIos: igual que tv — letras SIEMPRE en Inter y los emojis con Apple Emoji
+    // (span por rango, no cambiar el typeface del TextView entero)
     private TextView tvIos(String text, float sizeSp, boolean bold, int color) {
-        TextView t = tv(text, sizeSp, bold, color);
-        t.setTypeface(TF_EMOJI);
-        return t;
+        return tv(text, sizeSp, bold, color);
+    }
+
+    // Rango de codepoints que viven en AppleEmoji.ttf (y防空solo ahí, no en Inter)
+    private static final int[] APPLE_CPS = {
+            0xFE0F, 0x20E3, 0x200D, 0x2705, 0x231B, 0x23F1, 0x23F3, 0x23F8, 0x274C,
+            0x2764, 0x26A0, 0x2B07, 0x2B50, 0x1F1EA, 0x1F1FB, 0x1F389, 0x1F441,
+            0x1F4B1, 0x1F4B3, 0x1F4B5, 0x1F4CA, 0x1F4CB, 0x1F4F4, 0x1F514,
+            0x1F525, 0x1F64F, 0x1FA99
+    };
+
+    private boolean isApple(int cp) {
+        for (int c : APPLE_CPS) if (c == cp) return true;
+        return cp >= 0x1F000 && cp <= 0x1FAFF;
+    }
+
+    private static class AppleSpan extends TypefaceSpan {
+        private final Typeface tf;
+        AppleSpan(Typeface t) { super(""); tf = t; }
+        @Override public void updateDrawState(TextPaint ds) { ds.setTypeface(tf); }
+        @Override public void updateMeasureState(TextPaint ds) { ds.setTypeface(tf); }
+    }
+
+    private CharSequence brandSpan(String text) {
+        if (text == null || text.length() == 0) return text;
+        boolean hasEmo = false;
+        for (int i = 0; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            if (isApple(cp)) { hasEmo = true; break; }
+            i += Character.charCount(cp);
+        }
+        if (!hasEmo) return text;
+        SpannableString ss = new SpannableString(text);
+        int i = 0, n = text.length();
+        while (i < n) {
+            int cp = text.codePointAt(i);
+            if (isApple(cp)) {
+                int st = i;
+                while (i < n) {
+                    int c2 = text.codePointAt(i);
+                    if (isApple(c2)) i += Character.charCount(c2); else break;
+                }
+                ss.setSpan(new AppleSpan(TF_EMOJI), st, i,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            } else {
+                i += Character.charCount(cp);
+            }
+        }
+        return ss;
     }
 
     private TextView bigTitle(String text) {
@@ -755,6 +805,7 @@ public class MainActivity extends Activity {
         EditText e = new EditText(this);
         e.setText(val);
         e.setSingleLine(true);
+        e.setTypeface(TF_REG);
         e.setTextColor(col("text_primary"));
         e.setHintTextColor(col("text_secondary"));
         e.setTextSize(14);
@@ -780,7 +831,7 @@ public class MainActivity extends Activity {
         }
         View sp = new View(this);
         row.addView(sp, new LinearLayout.LayoutParams(0, 1, 1));
-        TextView save = tv("Guardar", 14, true, col("accent"));
+        TextView save = tv(S("Guardar", "Save"), 14, true, col("accent"));
         save.setPadding(dp(16), dp(14), 0, dp(4));
         save.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -917,6 +968,7 @@ public class MainActivity extends Activity {
         e.setGravity(Gravity.TOP);
         e.setTextColor(col("text_primary"));
         e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        e.setTypeface(TF_REG);
         e.setBackground(rounded(col("input_bg"), 12));
         e.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(140));
@@ -1243,7 +1295,7 @@ public class MainActivity extends Activity {
                 String val = v.optString(fields[i], "");
                 if (!val.isEmpty()) txt.append(ptField(t, i)).append(": ").append(val).append("\n");
             }
-            txt.append("\nEnviado con Super Cambio");
+            txt.append("\n").append(S("Enviado con Super Cambio", "Sent with Super Cambio"));
 
             Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/compartir.png");
             Intent it = new Intent(Intent.ACTION_SEND);
@@ -1271,9 +1323,9 @@ public class MainActivity extends Activity {
         int secCol = dk ? 0xFF98989F : 0xFF8E8E93;
 
         String[][] rows = new String[4][5]; // nombre | valor | color | badge | fuente
-        rows[0] = new String[]{"Dólar BCV", fmt(bcvUsd) + " Bs.", "accent", "USD", "BCV"};
-        rows[1] = new String[]{S("Dólar paralelo", "Parallel dollar"), fmt(paralelo) + " Bs.", "green", "USD", "Promedio"};
-        rows[2] = new String[]{"Euro BCV", fmt(bcvEur) + " Bs.", "purple", "EUR", "BCV"};
+        rows[0] = new String[]{S("Dólar BCV", "BCV Dollar"), fmt(bcvUsd) + " Bs.", "accent", "USD", "BCV"};
+        rows[1] = new String[]{S("Dólar paralelo", "Parallel dollar"), fmt(paralelo) + " Bs.", "green", "USD", S("Promedio", "Average")};
+        rows[2] = new String[]{S("Euro BCV", "BCV Euro"), fmt(bcvEur) + " Bs.", "purple", "EUR", "BCV"};
         rows[3] = new String[]{"USDT Binance", fmt(usdt) + " Bs.", "orange", "USDT", "P2P"};
 
         int W = 1000, pad = 56, headH = 200, rowH = 122, footH = 130;
@@ -1297,7 +1349,7 @@ public class MainActivity extends Activity {
         cv.drawText("Super Cambio", tx, siBase(titleP, pad + 56), titleP);
         Paint typeP = siLight(secCol, 34);
         SimpleDateFormat df = new SimpleDateFormat("d 'de' MMMM, yyyy", new Locale("es"));
-        String fecha = "Tasas de hoy · " + df.format(new Date());
+        String fecha = S("Tasas de hoy · ", "Today's rates · ") + df.format(new Date());
         siFit(typeP, fecha, W - tx - 40);
         cv.drawText(fecha, tx, siBase(typeP, pad + 106), typeP);
 
@@ -1357,7 +1409,7 @@ public class MainActivity extends Activity {
 
             StringBuilder txt = new StringBuilder(S("Tasas de hoy en Venezuela\n", "Today's rates in Venezuela\n"));
             for (int i = 0; i < 4; i++) txt.append(rows[i][0]).append(": ").append(rows[i][1]).append("\n");
-            txt.append("\nEnviado con Super Cambio");
+            txt.append("\n").append(S("Enviado con Super Cambio", "Sent with Super Cambio"));
 
             Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/tasas.png");
             Intent it = new Intent(Intent.ACTION_SEND);
@@ -1365,7 +1417,7 @@ public class MainActivity extends Activity {
             it.putExtra(Intent.EXTRA_STREAM, uri);
             it.putExtra(Intent.EXTRA_TEXT, txt.toString());
             it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(it, "Compartir tasas"));
+            startActivity(Intent.createChooser(it, S("Compartir tasas", "Share rates")));
         } catch (Exception e) {
             Toast.makeText(this, S("No se pudo generar la imagen", "Couldn't generate the image"), Toast.LENGTH_SHORT).show();
         }
@@ -1743,7 +1795,7 @@ public class MainActivity extends Activity {
                 nextCountdown.setText("—");
                 nextCountdown.setTextColor(col("text_primary"));
                 datePill.setText("—");
-                nextStatus.setText(S("Actualiza para calcular la próxima publicación del BCV.", "Refresh to estimate the BCV's next publication."));
+                nextStatus.setText(brandSpan(S("Actualiza para calcular la próxima publicación del BCV.", "Refresh to estimate the BCV's next publication.")));
                 return;
             }
             long next = computeNextPublish(last);
@@ -1755,9 +1807,9 @@ public class MainActivity extends Activity {
             if (diff <= 0) {
                 nextCountdown.setTextColor(col("text_primary"));
                 nextCountdown.setText(S("¡Atento!", "Stay tuned!"));
-                datePill.setText(S("👁  Ver nueva tasa", "👁  View new rate"));
+                datePill.setText(brandSpan(S("👁  Ver nueva tasa", "👁  View new rate")));
                 datePill.setTextColor(col("green"));
-                nextStatus.setText(S("La nueva tasa puede estar vigente desde ahora. Toca para verla.", "The new rate may be live now. Tap to view it."));
+                nextStatus.setText(brandSpan(S("La nueva tasa puede estar vigente desde ahora. Toca para verla.", "The new rate may be live now. Tap to view it.")));
                 if (!autoBusy) autoFetchNextRate(false);
                 return;
             }
@@ -1766,7 +1818,7 @@ public class MainActivity extends Activity {
             dateAct.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
             nextCountdown.setTextColor(col("text_primary"));
             nextCountdown.setText(countdownText(diff));
-            nextStatus.setText(S("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).", "Time left until the next publication (est. 3:30 PM, business day)."));
+            nextStatus.setText(brandSpan(S("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).", "Time left until the next publication (est. 3:30 PM, business day).")));
         }
 
         private void autoFetchNextRate(boolean force) {
@@ -1814,9 +1866,9 @@ public class MainActivity extends Activity {
                                 updateAllPages();
                                 celebrateUntil = System.currentTimeMillis() + 10000;
                                 haptic(nextCountdown);
-                                pageRates.nextStatus.setText(S("🎉 ¡Nueva tasa publicada!", "🎉 New rate published!"));
+                                pageRates.nextStatus.setText(brandSpan(S("🎉 ¡Nueva tasa publicada!", "🎉 New rate published!")));
                                 nextCountdown.setTextColor(col("green"));
-                                nextCountdown.setText("¡Nueva tasa publicada!");
+                                nextCountdown.setText(S("¡Nueva tasa publicada!", "New rate published!"));
                                 nextCountdown.setScaleX(1.15f);
                                 nextCountdown.setScaleY(1.15f);
                                 nextCountdown.animate().scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(pop).start();
@@ -2309,6 +2361,7 @@ public class MainActivity extends Activity {
             input.setBackground(rounded(col("input_bg"), 14));
             input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
             input.setTextColor(col("text_primary"));
+            input.setTypeface(TF_MED);
             input.setHint("0,00");
             input.setHintTextColor(col("text_secondary"));
             input.setPadding(dp(16), dp(15), dp(16), dp(15));
@@ -2390,7 +2443,7 @@ public class MainActivity extends Activity {
 
             // Compartir el resultado de la conversión
             Button convShare = new Button(MainActivity.this);
-            convShare.setText("Compartir resultado");
+            convShare.setText(S("Compartir resultado", "Share result"));
             convShare.setTextColor(Color.WHITE);
             convShare.setTextSize(15);
             convShare.setTypeface(TF_MED);
@@ -2509,7 +2562,7 @@ public class MainActivity extends Activity {
             Paint titleP = siPaint(priCol, 50, true);
             cv.drawText("Super Cambio", tx, siBase(titleP, pad + 56), titleP);
             Paint subP = siLight(secCol, 34);
-            cv.drawText("Conversor de moneda", tx, siBase(subP, pad + 106), subP);
+            cv.drawText(S("Conversor de moneda", "Currency converter"), tx, siBase(subP, pad + 106), subP);
 
             Paint sepP = new Paint();
             sepP.setColor(dk ? 0x24FFFFFF : 0x14000000);
@@ -2547,14 +2600,14 @@ public class MainActivity extends Activity {
                 fo.close();
                 bmp.recycle();
 
-                String txt = montoTxt + " = " + resTxt + "\n" + tasaTxt + "\n\nEnviado con Super Cambio";
+                String txt = montoTxt + " = " + resTxt + "\n" + tasaTxt + "\n\n" + S("Enviado con Super Cambio", "Sent with Super Cambio");
                 Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/conversion.png");
                 Intent it = new Intent(Intent.ACTION_SEND);
                 it.setType("image/png");
                 it.putExtra(Intent.EXTRA_STREAM, uri);
                 it.putExtra(Intent.EXTRA_TEXT, txt);
                 it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                startActivity(Intent.createChooser(it, "Compartir conversión"));
+                startActivity(Intent.createChooser(it, S("Compartir conversión", "Share conversion")));
             } catch (Exception e) {
                 Toast.makeText(MainActivity.this, S("No se pudo generar la imagen", "Couldn't generate the image"), Toast.LENGTH_SHORT).show();
             }
@@ -2577,7 +2630,7 @@ public class MainActivity extends Activity {
         box.setPadding(pad, dp(8), pad, dp(110));
         root.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        box.addView(bigTitle("Acerca de"));
+        box.addView(bigTitle(S("Acerca de", "About")));
 
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.VERTICAL);
@@ -3108,8 +3161,8 @@ public class MainActivity extends Activity {
                     public void run() {
                         updateAllPages();
                         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
-                        if (ok) pageRates.status.setText(S("✅ Actualizado: ", "✅ Updated: ") + f.format(new Date()));
-                        else pageRates.status.setText(S("📴 Sin conexión · mostrando últimos datos", "📴 Offline · showing last data"));
+                        if (ok) pageRates.status.setText(TextUtils.concat(brandSpan(S("✅ Actualizado: ", "✅ Updated: ")), f.format(new Date())));
+                        else pageRates.status.setText(brandSpan(S("📴 Sin conexión · mostrando últimos datos", "📴 Offline · showing last data")));
                         syncSharedHist(false);
                     }
                 });
@@ -3357,12 +3410,12 @@ public class MainActivity extends Activity {
                     public void run() {
                         if (!fOk) {
                             if (!fCanceled) {
-                                pct.setText(S("❌ Error de descarga · revisa tu conexión", "❌ Download failed · check your connection"));
+                                pct.setText(brandSpan(S("❌ Error de descarga · revisa tu conexión", "❌ Download failed · check your connection")));
                                 Toast.makeText(MainActivity.this, S("❌ No se pudo descargar", "❌ Couldn't download"), Toast.LENGTH_LONG).show();
                             }
                             return;
                         }
-                        pct.setText(S("✅ Descarga completa · preparando instalación…", "✅ Download complete · preparing install…"));
+                        pct.setText(brandSpan(S("✅ Descarga completa · preparando instalación…", "✅ Download complete · preparing install…")));
                         installApk(fileName);
                         d.dismiss();
                     }
@@ -3525,7 +3578,7 @@ public class MainActivity extends Activity {
         try {
             if (updateTitle == null || updateSub == null) return;
             if (updTag.length() > 0) {
-                updateTitle.setText(S("⬇️ Nueva versión disponible: ", "⬇️ New version available: ") + updTag);
+                updateTitle.setText(TextUtils.concat(brandSpan(S("⬇️ Nueva versión disponible: ", "⬇️ New version available: ")), updTag));
                 updateTitle.setTextColor(col("green"));
                 updateSub.setText(S("Toca para descargar e instalar", "Tap to download and install"));
             } else {
