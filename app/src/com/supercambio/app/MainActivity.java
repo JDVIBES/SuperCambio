@@ -8,6 +8,7 @@ import android.appwidget.AppWidgetManager;
 import android.app.Dialog;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -29,6 +30,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
@@ -103,6 +105,11 @@ public class MainActivity extends Activity {
     private String updTag = "", updUrl = "", updNotes = "";
     private TextView updateTitle, updateSub;
     private long updSize = 0;
+    private Dialog promptDlg;
+    private Dialog downloadDlg;
+    private String pendingApkFile = "";
+    private volatile boolean dlCancel = false;
+    private static final int REQ_INSTALL = 4001;
     private boolean langEn = false;
     private boolean dailyNotif = false;
 
@@ -186,6 +193,11 @@ public class MainActivity extends Activity {
         refresh();
         syncSharedHist(false);
         checkForUpdates(false);
+        ui.postDelayed(new Runnable() {
+            public void run() {
+                if (updTag.length() > 0) updatePrompt();
+            }
+        }, 1400);
     }
 
     private boolean isDark() {
@@ -3075,6 +3087,127 @@ public class MainActivity extends Activity {
 
     // ===== Actualizaciones desde GitHub =====
 
+    private void updatePrompt() {
+        if (updTag.length() == 0 || updUrl.length() == 0) return;
+        if (promptDlg != null && promptDlg.isShowing()) return;
+        if (downloadDlg != null && downloadDlg.isShowing()) return;
+        final Dialog d = new Dialog(this);
+        promptDlg = d;
+        final LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        int p0 = dp(22);
+        c.setPadding(p0, p0, p0, p0);
+        c.setBackground(rounded(col("card_bg"), 26));
+        c.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        ImageView iv = new ImageView(this);
+        boolean showLogo = false;
+        try {
+            iv.setImageBitmap(logoBitmap(dp(52)));
+            showLogo = true;
+        } catch (Exception e) { }
+        LinearLayout.LayoutParams ivLp = new LinearLayout.LayoutParams(dp(52), dp(52));
+        ivLp.setMargins(0, dp(4), 0, dp(12));
+        if (!showLogo) ivLp.height = 0;
+        c.addView(iv, ivLp);
+
+        TextView t = tv(S("⬇️ Actualización disponible", "⬇️ Update available"), 18, true, col("text_primary"));
+        t.setGravity(Gravity.CENTER);
+        c.addView(t, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView sub = tv(S("Super Cambio ", "Super Cambio ") + currentVersionName() + " → " + updTag
+                + (updSize > 0 ? " · " + fmtMB(updSize) : ""), 13, false, col("text_secondary"));
+        sub.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subLp.setMargins(0, dp(8), 0, 0);
+        c.addView(sub, subLp);
+
+        if (updNotes != null && updNotes.length() > 0) {
+            ScrollView ns = new ScrollView(this);
+            ns.setVerticalScrollBarEnabled(false);
+            TextView notes = tv(updNotes, 12, false, col("text_secondary"));
+            ns.addView(notes, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams nsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150));
+            nsLp.setMargins(0, dp(14), 0, 0);
+            c.addView(ns, nsLp);
+        }
+
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        int bp = dp(16);
+        btns.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams btnsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnsLp.setMargins(0, dp(18), 0, 0);
+        btns.addView(btnNo(d), lpBtn(1, 0, 0, 0));
+        btns.addView(btnDownload(d), lpBtn(3, dp(12), 0, 0));
+        c.addView(btns, btnsLp);
+
+        d.setContentView(c, new ViewGroup.LayoutParams(dp(330), ViewGroup.LayoutParams.WRAP_CONTENT));
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.dimAmount = 0.45f;
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
+        d.show();
+    }
+
+    private TextView btnNo(final Dialog d) {
+        TextView b = tv(S("Ahora no", "Not now"), 14, true, col("text_secondary"));
+        b.setGravity(Gravity.CENTER);
+        b.setBackground(rounded(col("input_bg"), 23));
+        b.setMinHeight(dp(46));
+        b.setPadding(dp(10), 0, dp(10), 0);
+        b.setGravity(Gravity.CENTER);
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                haptic(v);
+                d.dismiss();
+            }
+        });
+        return b;
+    }
+
+    private TextView btnDownload(final Dialog d) {
+        TextView b = tv(S("⬇️ Descargar", "⬇️ Download"), 14, true, Color.WHITE);
+        b.setGravity(Gravity.CENTER);
+        b.setBackground(rounded(col("accent"), 23));
+        b.setMinHeight(dp(46));
+        b.setPadding(dp(10), 0, dp(10), 0);
+        b.setGravity(Gravity.CENTER);
+        b.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                haptic(v);
+                d.dismiss();
+                downloadScreen();
+            }
+        });
+        return b;
+    }
+
+    private LinearLayout.LayoutParams lpBtn(int weight, int l, int t, int r) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), weight);
+        lp.setMargins(l, t, r, 0);
+        return lp;
+    }
+
+    private android.graphics.Bitmap logoBitmap(int size) {
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas cv = new android.graphics.Canvas(bmp);
+        float radius = size * 0.2237f;
+        RectF rf = new RectF(0, 0, size, size);
+        android.graphics.Path path = new android.graphics.Path();
+        path.addRoundRect(rf, radius, radius, android.graphics.Path.Direction.CW);
+        cv.save();
+        cv.clipPath(path);
+        Drawable ld = logoDrawable();
+        ld.setBounds(0, 0, size, size);
+        ld.draw(cv);
+        cv.restore();
+        return bmp;
+    }
+
     private void downloadScreen() {
         if (updUrl == null || updUrl.length() == 0 || updTag == null || updTag.length() == 0) {
             Toast.makeText(this, S("No hay descarga disponible", "No download available"), Toast.LENGTH_SHORT).show();
@@ -3082,6 +3215,7 @@ public class MainActivity extends Activity {
         }
         final String fileName = "actualizar-" + updTag + ".apk";
         final Dialog d = new Dialog(this);
+        downloadDlg = d;
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         int p0 = dp(20);
@@ -3099,7 +3233,7 @@ public class MainActivity extends Activity {
         pbLp.setMargins(0, dp(14), 0, 0);
         c.addView(pb, pbLp);
 
-        final TextView pct = tv("0%", 13, true, col("text_secondary"));
+        final TextView pct = tv(S("Conectando…", "Connecting…"), 13, true, col("text_secondary"));
         pct.setGravity(Gravity.CENTER);
         c.addView(pct, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -3121,7 +3255,12 @@ public class MainActivity extends Activity {
         cancel.setGravity(Gravity.CENTER);
         cancel.setPadding(0, dp(14), 0, 0);
         cancel.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { d.dismiss(); }
+            public void onClick(View v) {
+                haptic(v);
+                dlCancel = true;
+                d.dismiss();
+                Toast.makeText(MainActivity.this, S("⏸ Descarga cancelada", "⏸ Download canceled"), Toast.LENGTH_SHORT).show();
+            }
         });
         c.addView(cancel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -3133,11 +3272,18 @@ public class MainActivity extends Activity {
             lp.dimAmount = 0.45f;
             w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         }
+        d.setOnDismissListener(new Dialog.OnDismissListener() {
+            public void onDismiss(DialogInterface di) {
+                if (downloadDlg == d) downloadDlg = null;
+            }
+        });
         d.show();
+        dlCancel = false;
 
         new Thread(new Runnable() {
             public void run() {
                 boolean ok = false;
+                File out = new File(getCacheDir(), fileName);
                 try {
                     HttpURLConnection conn = (HttpURLConnection) new URL(updUrl).openConnection();
                     conn.setConnectTimeout(15000);
@@ -3146,12 +3292,11 @@ public class MainActivity extends Activity {
                     conn.connect();
                     long len = conn.getContentLength();
                     InputStream in = conn.getInputStream();
-                    File out = new File(getCacheDir(), fileName);
                     FileOutputStream fo = new FileOutputStream(out);
                     byte[] buf = new byte[8192];
                     long total = 0;
                     int n;
-                    while ((n = in.read(buf)) > 0) {
+                    while ((n = in.read(buf)) > 0 && !dlCancel) {
                         fo.write(buf, 0, n);
                         total += n;
                         if (len > 0) {
@@ -3160,35 +3305,92 @@ public class MainActivity extends Activity {
                             ui.post(new Runnable() {
                                 public void run() { pb.setProgress(pc); pct.setText(pc + "% · " + st); }
                             });
+                        } else {
+                            final String st = fmtMB(total);
+                            ui.post(new Runnable() {
+                                public void run() { pct.setText(st); }
+                            });
                         }
                     }
                     fo.close();
                     in.close();
                     conn.disconnect();
-                    ok = total > 0;
+                    ok = !dlCancel && total > 0;
                 } catch (Exception ignored) { }
+                if (!ok) out.delete();
                 final boolean fOk = ok;
+                final boolean fCanceled = dlCancel;
                 ui.post(new Runnable() {
                     public void run() {
                         if (!fOk) {
-                            pct.setText(S("❌ Error de descarga · revisa tu conexión", "❌ Download failed · check your connection"));
+                            if (!fCanceled) {
+                                pct.setText(S("❌ Error de descarga · revisa tu conexión", "❌ Download failed · check your connection"));
+                                Toast.makeText(MainActivity.this, S("❌ No se pudo descargar", "❌ Couldn't download"), Toast.LENGTH_LONG).show();
+                            }
                             return;
                         }
-                        pct.setText(S("✅ Descarga completa · abriendo instalador…", "✅ Download complete · opening installer…"));
-                        try {
-                            Intent it = new Intent(Intent.ACTION_VIEW);
-                            it.setDataAndType(Uri.parse("content://" + ShareProvider.AUTHORITY + "/" + fileName),
-                                    "application/vnd.android.package-archive");
-                            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-                            startActivity(it);
-                            d.dismiss();
-                        } catch (Exception e) {
-                            Toast.makeText(MainActivity.this, S("No se pudo abrir el instalador", "Couldn't open the installer"), Toast.LENGTH_LONG).show();
-                        }
+                        pct.setText(S("✅ Descarga completa · preparando instalación…", "✅ Download complete · preparing install…"));
+                        installApk(fileName);
+                        d.dismiss();
                     }
                 });
             }
         }).start();
+    }
+
+    private void installApk(final String fileName) {
+        File f = new File(getCacheDir(), fileName);
+        if (!f.exists() || f.length() < 1024) {
+            Toast.makeText(this, S("❌ El archivo de instalación no es válido", "❌ Installer file is invalid"), Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 26) {
+            boolean can = false;
+            try { can = getPackageManager().canRequestPackageInstalls(); } catch (Exception ignored) { }
+            if (!can) {
+                pendingApkFile = fileName;
+                try {
+                    Intent it = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivityForResult(it, REQ_INSTALL);
+                    return;
+                } catch (Exception e) {
+                    pendingApkFile = "";
+                    Toast.makeText(this, S("⚠️ Activa \"Fuentes desconocidas\" para esta app en Ajustes", "⚠️ Enable \"Unknown sources\" for this app in Settings"), Toast.LENGTH_LONG).show();
+                }
+            }
+        }
+        launchInstall(fileName);
+    }
+
+    private void launchInstall(String fileName) {
+        try {
+            Intent it = new Intent(Intent.ACTION_VIEW);
+            it.setDataAndType(Uri.parse("content://" + ShareProvider.AUTHORITY + "/" + fileName),
+                    "application/vnd.android.package-archive");
+            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(it);
+        } catch (Exception e) {
+            Toast.makeText(this, S("No se pudo abrir el instalador", "Couldn't open the installer"), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_INSTALL && pendingApkFile.length() > 0) {
+            final String f = pendingApkFile;
+            pendingApkFile = "";
+            if (Build.VERSION.SDK_INT >= 26) {
+                boolean can = false;
+                try { can = getPackageManager().canRequestPackageInstalls(); } catch (Exception ignored) { }
+                if (can) {
+                    launchInstall(f);
+                    return;
+                }
+            }
+            Toast.makeText(this, S("❌ Permiso de instalación denegado", "❌ Install permission denied"), Toast.LENGTH_LONG).show();
+        }
     }
 
     private String fmtMB(long bytes) {
@@ -3224,7 +3426,7 @@ public class MainActivity extends Activity {
     private void checkForUpdates(final boolean manual) {
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long now = System.currentTimeMillis();
-        if (updBusy || (!manual && now - p.getLong("upd_last", 0) < 3600000L)) return;
+        if (updBusy || (!manual && now - p.getLong("upd_last", 0) < 600000L)) return;
         updBusy = true;
         new Thread(new Runnable() {
             public void run() {
@@ -3259,10 +3461,17 @@ public class MainActivity extends Activity {
                         updSize = fSize;
                         paintUpdateRow();
                         paintUpdateBadge();
-                        if (manual) {
+                        if (isNew) {
+                            if (manual) {
+                                Toast.makeText(MainActivity.this,
+                                        S("🔔 Nueva versión disponible: ", "🔔 New version available: ") + fTag,
+                                        Toast.LENGTH_LONG).show();
+                            } else {
+                                updatePrompt();
+                            }
+                        } else if (manual) {
                             Toast.makeText(MainActivity.this,
-                                    isNew ? S("🔔 Nueva versión disponible: ", "🔔 New version available: ") + fTag
-                                          : S("✅ Ya tienes la última versión", "✅ You're up to date"),
+                                    S("✅ Ya tienes la última versión", "✅ You're up to date"),
                                     Toast.LENGTH_LONG).show();
                         }
                     }
