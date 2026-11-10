@@ -45,7 +45,10 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.view.ViewConfiguration;
+import android.view.ViewParent;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
@@ -2136,10 +2139,18 @@ public class MainActivity extends Activity {
         private float progress = 1f;
         private ValueAnimator reveal;
 
+        // ventana visible: zoom (1 = todo el historial) y desplazamiento en unidades de punto
+        private float zoom = 1f, startF = 0f;
+        private float gX0, gY0, gPan0, gSpan = -1f, lastUpX;
+        private boolean gPan, gScrollPass, gOver;
+        private long lastUpT = 0L;
+        private ScaleGestureDetector scaleDet;
+
         private Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint grid = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint lblB = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         ChartView() {
@@ -2155,11 +2166,136 @@ public class MainActivity extends Activity {
             grid.setPathEffect(new DashPathEffect(new float[]{dp(4), dp(6)}, 0));
             txt.setColor(col("text_secondary"));
             txt.setTextSize(dp(10.5f));
+            txt.setTypeface(TF_REG);
+            lblB.setColor(col("text_secondary"));
+            lblB.setTextSize(dp(11.5f));
+            lblB.setTypeface(TF_BOLD);
+
+            scaleDet = new ScaleGestureDetector(MainActivity.this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                public boolean onScale(ScaleGestureDetector d) {
+                    float span = d.getCurrentSpanX();
+                    if (gSpan <= 0f) { gSpan = span; return true; }
+                    if (Math.abs(span - gSpan) > 0.01f) {
+                        applyZoom(d.getFocusX(), span / gSpan);
+                        gSpan = span;
+                    }
+                    return true;
+                }
+            });
+
+            setOnTouchListener(new View.OnTouchListener() {
+                public boolean onTouch(View v, MotionEvent ev) {
+                    ViewParent sc = v.getParent();
+                    int act = ev.getActionMasked();
+                    if (act == MotionEvent.ACTION_DOWN) {
+                        if (progress < 1f) {
+                            if (reveal != null) reveal.cancel();
+                            progress = 1f;
+                        }
+                        gPan = false; gScrollPass = false; gOver = false; gSpan = -1f;
+                        gX0 = ev.getX(); gY0 = ev.getY(); gPan0 = startF;
+                        long now = System.currentTimeMillis();
+                        if (now - lastUpT < 350L && Math.abs(ev.getX() - lastUpX) < dp(28f)) {
+                            zoom = 1f; startF = 0f; gOver = true; invalidate();
+                            lastUpT = 0L;
+                            return true;
+                        }
+                        invalidate();
+                        return true;
+                    }
+                    if (gOver) {
+                        if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) gOver = false;
+                        return true;
+                    }
+                    if (act == MotionEvent.ACTION_POINTER_DOWN) {
+                        gPan = false; gScrollPass = false; gSpan = -1f;
+                        if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
+                        return true;
+                    }
+                    if (act == MotionEvent.ACTION_MOVE) {
+                        if (ev.getPointerCount() > 1) {
+                            if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
+                            scaleDet.onTouchEvent(ev);
+                            invalidate();
+                            return true;
+                        }
+                        float dx = ev.getX() - gX0, dy = ev.getY() - gY0;
+                        if (!gPan && !gScrollPass) {
+                            int slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
+                            if (Math.abs(dx) > slop || Math.abs(dy) > slop) {
+                                if (Math.abs(dx) > Math.abs(dy) && zoom > 1.001f) {
+                                    gPan = true;
+                                    if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
+                                } else {
+                                    gScrollPass = true;
+                                    if (sc != null) sc.requestDisallowInterceptTouchEvent(false);
+                                }
+                            }
+                        }
+                        if (gPan) {
+                            float usableW = Math.max(1f, getWidth() - pl() - pr());
+                            startF = gPan0 - (ev.getX() - gX0) / usableW * winNow();
+                            clampStart();
+                            invalidate();
+                            return true;
+                        }
+                        return false;
+                    }
+                    if (act == MotionEvent.ACTION_UP) {
+                        lastUpT = System.currentTimeMillis();
+                        lastUpX = ev.getX();
+                        if (sc != null) sc.requestDisallowInterceptTouchEvent(false);
+                        return true;
+                    }
+                    if (act == MotionEvent.ACTION_CANCEL) {
+                        if (sc != null) sc.requestDisallowInterceptTouchEvent(false);
+                        return true;
+                    }
+                    return false;
+                }
+            });
+        }
+
+        private float pl() { return dp(10f); }
+        private float pr() { return dp(10f); }
+        private float pt() { return dp(32f); }
+        private float pb() { return dp(48f); }
+
+        private float winNow() {
+            if (vals == null || vals.length < 2) return 2f;
+            float t = vals.length;
+            float f = t / zoom;
+            if (f < 2f) { zoom = t / 2f; f = 2f; }
+            if (f > t) { zoom = 1f; f = t; }
+            return f;
+        }
+
+        private void clampStart() {
+            if (vals == null) { startF = 0f; return; }
+            float t = vals.length;
+            float maxStart = Math.max(0f, t - winNow());
+            if (startF < 0f) startF = 0f;
+            if (startF > maxStart) startF = maxStart;
+        }
+
+        private void applyZoom(float fx, float factor) {
+            if (vals == null || vals.length < 2) return;
+            float t = vals.length;
+            float usableW = Math.max(1f, getWidth() - pl() - pr());
+            float rel = Math.min(1f, Math.max(0f, (fx - pl()) / usableW));
+            float oldWin = winNow();
+            float anchor = startF + rel * oldWin;
+            zoom = Math.min(t / 2f, Math.max(1f, zoom * factor));
+            float nw = winNow();
+            startF = anchor - rel * nw;
+            clampStart();
         }
 
         void setData(float[] v, long[] t) {
             vals = v;
             times = t;
+            zoom = 1f;
+            startF = 0f;
         }
 
         void startReveal() {
@@ -2183,37 +2319,52 @@ public class MainActivity extends Activity {
             int w = getWidth(), h = getHeight();
             if (w == 0 || h == 0) return;
 
+            float padL = pl(), padR = pr(), padT = pt(), padB = pb();
+            float usableW = w - padL - padR;
+            float usableH = h - padT - padB;
+            float plotB = padT + usableH;
+
             if (vals == null || vals.length < 2) {
                 txt.setTextAlign(Paint.Align.CENTER);
-                canvas.drawText("Recolectando datos…", w / 2f, h / 2f - dp(8), txt);
-                canvas.drawText("Cada apertura guarda un punto de la tasa.", w / 2f, h / 2f + dp(10), txt);
+                canvas.drawText(S("Recolectando datos…", "Collecting data…"), w / 2f, h / 2f - dp(8), txt);
+                canvas.drawText(S("Cada apertura guarda un punto de la tasa.", "Each open saves one data point."), w / 2f, h / 2f + dp(10), txt);
                 txt.setTextAlign(Paint.Align.LEFT);
                 return;
             }
 
-            int n = vals.length;
-            float min = vals[0], max = vals[0];
-            int iMax = 0, iMin = 0;
-            for (int i = 0; i < n; i++) {
-                if (vals[i] < min) { min = vals[i]; iMin = i; }
-                if (vals[i] > max) { max = vals[i]; iMax = i; }
+            int totalN = vals.length;
+            float win = winNow();
+            clampStart();
+            int iA = (int) Math.floor(startF) - 1;
+            if (iA < 0) iA = 0;
+            int iB = (int) Math.ceil(startF + win) + 1;
+            if (iB > totalN - 1) iB = totalN - 1;
+            int m = iB - iA + 1;
+
+            float vmin = vals[iA], vmax = vals[iA];
+            for (int i = iA; i <= iB; i++) {
+                if (vals[i] < vmin) vmin = vals[i];
+                if (vals[i] > vmax) vmax = vals[i];
             }
-            boolean flat = (max - min) <= 0;
-            float range = flat ? 1 : (max - min);
+            float rng = vmax - vmin;
+            float mar = rng > 0f ? rng * 0.10f : Math.max(1e-6f, Math.abs(vmax) * 0.05f + 1e-6f);
+            float ymin = vmin - mar, ymax = vmax + mar;
+            float yr = ymax - ymin;
+            if (yr <= 0f) yr = 1f;
 
-            float padL = dp(10), padR = dp(10), padT = dp(26), padB = dp(30);
-            float usableW = w - padL - padR;
-            float usableH = h - padT - padB;
-
-            float[] xs = new float[n];
-            float[] ys = new float[n];
-            for (int i = 0; i < n; i++) {
-                xs[i] = padL + usableW * (n == 1 ? 0 : (i / (float) (n - 1)));
-                float norm = flat ? 0.5f : (vals[i] - min) / range;
-                ys[i] = padT + usableH * (1 - norm);
+            float[] xs = new float[m], ys = new float[m];
+            int iMaxK = 0, iMinK = 0;
+            for (int k = 0; k < m; k++) {
+                int idx = iA + k;
+                float rel = (idx - startF) / win;
+                xs[k] = padL + usableW * rel;
+                float norm = (vals[idx] - ymin) / yr;
+                ys[k] = padT + usableH * (1f - norm);
+                if (vals[idx] > vals[iA + iMaxK]) iMaxK = k;
+                if (vals[idx] < vals[iA + iMinK]) iMinK = k;
             }
 
-            boolean up = vals[n - 1] >= vals[0];
+            boolean up = vals[iB] >= vals[iA];
             int trend = up ? col("green") : col("red");
 
             for (int g = 0; g <= 2; g++) {
@@ -2223,10 +2374,10 @@ public class MainActivity extends Activity {
 
             Path fp = new Path();
             fp.moveTo(xs[0], ys[0]);
-            for (int i = 1; i < n; i++) fp.lineTo(xs[i], ys[i]);
+            for (int i = 1; i < m; i++) fp.lineTo(xs[i], ys[i]);
 
             Path drawPath = fp;
-            float endX = xs[n - 1], endY = ys[n - 1];
+            float endXLine = xs[m - 1], endYLine = ys[m - 1];
             if (progress < 1f) {
                 PathMeasure pm = new PathMeasure(fp, false);
                 float segLen = pm.getLength() * progress;
@@ -2236,17 +2387,22 @@ public class MainActivity extends Activity {
                 }
                 float[] pos = new float[2];
                 pm.getPosTan(segLen, pos, null);
-                endX = pos[0];
-                endY = pos[1];
+                endXLine = pos[0];
+                endYLine = pos[1];
                 drawPath = seg;
             }
 
+            // CLIP: la línea, el relleno y los puntos viven SOLO dentro del área de trazado,
+            // así ningún texto en las bandas exteriores puede quedar bajo la línea
+            int saveCnt = canvas.save();
+            canvas.clipRect(padL, padT, w - padR, plotB);
+
             Path area = new Path(drawPath);
-            area.lineTo(endX, padT + usableH);
-            area.lineTo(xs[0], padT + usableH);
+            area.lineTo(endXLine, plotB);
+            area.lineTo(xs[0], plotB);
             area.close();
             int cr = Color.red(trend), cg = Color.green(trend), cb = Color.blue(trend);
-            fill.setShader(new LinearGradient(0, padT, 0, padT + usableH,
+            fill.setShader(new LinearGradient(0, padT, 0, plotB,
                     Color.argb(66, cr, cg, cb), Color.argb(0, cr, cg, cb), Shader.TileMode.CLAMP));
             canvas.drawPath(area, fill);
             fill.setShader(null);
@@ -2254,33 +2410,45 @@ public class MainActivity extends Activity {
             line.setColor(trend);
             canvas.drawPath(drawPath, line);
 
-            if (n <= 60 && progress >= 1f) {
+            if (m <= 60 && progress >= 1f) {
                 dot.setColor(trend);
-                for (int i = 0; i < n; i++) {
+                for (int i = 0; i < m; i++) {
                     canvas.drawCircle(xs[i], ys[i], dp(2.2f), dot);
                 }
             }
+            canvas.restoreToCount(saveCnt);
+
+            // punto blanco del extremo del ventano
+            int iEnd = Math.round(startF + win);
+            if (iEnd > totalN - 1) iEnd = totalN - 1;
+            if (iEnd < iA) iEnd = iA;
+            float xEnd = padL + usableW * ((iEnd - startF) / win);
+            float yEnd = padT + usableH * (1f - (vals[iEnd] - ymin) / yr);
             dot.setColor(Color.WHITE);
-            canvas.drawCircle(endX, endY, dp(4.5f), dot);
+            canvas.drawCircle(xEnd, yEnd, dp(4.5f), dot);
             dot.setColor(trend);
-            canvas.drawCircle(endX, endY, dp(3f), dot);
+            canvas.drawCircle(xEnd, yEnd, dp(3f), dot);
 
-            float clampXmax = Math.min(Math.max(xs[iMax], padL + dp(22)), w - padR - dp(22));
-            float clampXmin = Math.min(Math.max(xs[iMin], padL + dp(22)), w - padR - dp(22));
-            float yMaxLbl = ys[iMax] - dp(9);
-            if (yMaxLbl < padT + dp(4)) yMaxLbl = ys[iMax] + dp(17);
-            float yMinLbl = ys[iMin] + dp(17);
-            if (yMinLbl > padT + usableH + dp(6)) yMinLbl = ys[iMin] - dp(9);
+            // ============ etiquetas: cada una en su BANDA reservada ============
+            // máximo → banda superior (la línea nunca entra aquí: clip)
+            lblB.setTextAlign(Paint.Align.CENTER);
+            String sMax = fmt(vals[iA + iMaxK]);
+            float hwMax = lblB.measureText(sMax) / 2f + 1f;
+            float xMax = Math.min(Math.max(xs[iMaxK], padL + hwMax), w - padR - hwMax);
+            canvas.drawText(sMax, xMax, padT - dp(9), lblB);
 
-            txt.setTextAlign(Paint.Align.CENTER);
-            canvas.drawText(fmt(max), clampXmax, yMaxLbl, txt);
-            canvas.drawText(fmt(min), clampXmin, yMinLbl, txt);
+            // mínimo → banda inferior
+            String sMin = fmt(vals[iA + iMinK]);
+            float hwMin = lblB.measureText(sMin) / 2f + 1f;
+            float xMin = Math.min(Math.max(xs[iMinK], padL + hwMin), w - padR - hwMin);
+            canvas.drawText(sMin, xMin, plotB + dp(13), lblB);
 
-            SimpleDateFormat f = new SimpleDateFormat("d MMM", new Locale("es"));
+            // fechas del ventano visible — fila inferior separada de la etiqueta mín
+            SimpleDateFormat fdf = new SimpleDateFormat("d MMM", new Locale("es"));
             txt.setTextAlign(Paint.Align.LEFT);
-            canvas.drawText(f.format(new Date(times[0])), padL, h - dp(8), txt);
+            canvas.drawText(fdf.format(new Date(times[iA])), padL, h - dp(10), txt);
             txt.setTextAlign(Paint.Align.RIGHT);
-            canvas.drawText(f.format(new Date(times[n - 1])), w - padR, h - dp(8), txt);
+            canvas.drawText(fdf.format(new Date(times[iB])), w - padR, h - dp(10), txt);
             txt.setTextAlign(Paint.Align.LEFT);
         }
     }
