@@ -2777,7 +2777,7 @@ public class MainActivity extends Activity {
                 return;
             }
             String sym = mode == 1 ? "EUR" : mode == 0 ? "USD" : "USDT";
-            String montoTxt = fmt(amt) + " " + sym;
+            String montoTxt = invert ? fmt(amt) + " Bs." : fmt(amt) + " " + sym;
             String resTxt = invert ? fmt(amt / rate) + " " + sym : fmt(amt * rate) + " Bs.";
             String tasaTxt = S("Tasa: ", "Rate: ") + fmt(rate) + S(" Bs. por ", " Bs. per ") + sym
                     + " · " + (mode == 2 ? "Binance P2P" : "BCV");
