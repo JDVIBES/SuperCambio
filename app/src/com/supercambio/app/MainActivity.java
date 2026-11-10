@@ -2601,11 +2601,7 @@ public class MainActivity extends Activity {
             });
         }
 
-        // Idioma / Language
-        rowSep(themeCard);
-        rowLang(themeCard, S("Idioma: Español", "Language: Español"), !langEn, false);
-        rowSep(themeCard);
-        rowLang(themeCard, S("Language: English", "Language: English"), langEn, true);
+
 
         rowSep(themeCard);
         LinearLayout blurRow = new LinearLayout(this);
@@ -2727,6 +2723,13 @@ public class MainActivity extends Activity {
             }
         });
         hapRow.addView(hapSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Idioma — sección dedicada
+        box.addView(sectionLabel(S("Idioma", "Language")));
+        LinearLayout langCard = card(box);
+        rowLang(langCard, S("Español", "Español"), !langEn, false);
+        rowSep(langCard);
+        rowLang(langCard, S("English", "English"), langEn, true);
 
         // Créditos
         box.addView(sectionLabel(S("Actualizaciones", "Updates")));
