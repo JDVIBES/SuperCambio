@@ -2256,31 +2256,26 @@ public class MainActivity extends Activity {
                 });
             }
 
-            LinearLayout row = new LinearLayout(MainActivity.this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rlp.setMargins(0, dp(18), 0, 0);
-            card.addView(row, rlp);
-
             LinearLayout colFrom = new LinearLayout(MainActivity.this);
             colFrom.setOrientation(LinearLayout.VERTICAL);
-            row.addView(colFrom, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            LinearLayout.LayoutParams cflp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            cflp.setMargins(0, dp(20), 0, 0);
+            card.addView(colFrom, cflp);
 
-            labelFrom = tv("Monto en USD", 13, false, col("text_secondary"));
-            colFrom.addView(labelFrom);
+            labelFrom = tv(S("Monto en USD", "Amount in USD"), 13, false, col("text_secondary"));
+            LinearLayout.LayoutParams lfLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lfLp.setMargins(dp(4), 0, 0, dp(7));
+            colFrom.addView(labelFrom, lfLp);
 
             input = new EditText(MainActivity.this);
             input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-            input.setBackground(rounded(col("input_bg"), 12));
-            input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+            input.setBackground(rounded(col("input_bg"), 14));
+            input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
             input.setTextColor(col("text_primary"));
             input.setHint("0,00");
             input.setHintTextColor(col("text_secondary"));
-            input.setPadding(dp(14), dp(12), dp(14), dp(12));
-            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            ilp.setMargins(0, dp(8), 0, 0);
-            colFrom.addView(input, ilp);
+            input.setPadding(dp(16), dp(15), dp(16), dp(15));
+            colFrom.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             input.addTextChangedListener(new TextWatcher() {
                 public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
@@ -2288,31 +2283,39 @@ public class MainActivity extends Activity {
                 public void afterTextChanged(Editable s) { recompute(); }
             });
 
-            Button swap = new Button(MainActivity.this);
-            swap.setText("⇅");
-            swap.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-            swap.setTextColor(col("accent"));
-            swap.setBackgroundColor(Color.TRANSPARENT);
-            swap.setPadding(dp(4), 0, dp(4), 0);
+            // Invertir dirección — círculo centrado entre los dos montos
+            FrameLayout swapWrap = new FrameLayout(MainActivity.this);
+            LinearLayout.LayoutParams swLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56));
+            swLp.setMargins(0, dp(10), 0, dp(2));
+            card.addView(swapWrap, swLp);
+
+            int acc = col("accent");
+            TextView swap = tv("⇅", 18, true, acc);
+            swap.setGravity(Gravity.CENTER);
+            swap.setBackground(rounded(Color.argb(36, Color.red(acc), Color.green(acc), Color.blue(acc)), 999));
+            FrameLayout.LayoutParams fsw = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER);
+            swapWrap.addView(pressScale(swap), fsw);
             swap.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     invert = !invert;
+                    haptic(v);
                     v.animate().rotationBy(180f).setDuration(300).setInterpolator(decel).start();
                     recompute();
                 }
             });
-            row.addView(swap, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             LinearLayout colTo = new LinearLayout(MainActivity.this);
             colTo.setOrientation(LinearLayout.VERTICAL);
-            row.addView(colTo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            card.addView(colTo, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             labelTo = tv(S("Resultado en Bs.", "Result in Bs."), 13, false, col("text_secondary"));
-            colTo.addView(labelTo);
+            LinearLayout.LayoutParams ltLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            ltLp.setMargins(dp(4), 0, 0, dp(7));
+            colTo.addView(labelTo, ltLp);
 
-            result = tv("—", 24, true, col("text_primary"));
-            result.setBackground(rounded(col("input_bg"), 12));
-            result.setPadding(dp(14), dp(16), dp(14), dp(16));
+            result = tv("—", 26, true, col("text_primary"));
+            result.setBackground(rounded(col("input_bg"), 14));
+            result.setPadding(dp(16), dp(16), dp(16), dp(16));
             result.setClickable(true);
             result.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
@@ -2321,9 +2324,7 @@ public class MainActivity extends Activity {
                     copyClip("Resultado", t, result);
                 }
             });
-            LinearLayout.LayoutParams rslp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rslp.setMargins(0, dp(8), 0, 0);
-            colTo.addView(pressScale(result), rslp);
+            colTo.addView(pressScale(result), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             LinearLayout chips = new LinearLayout(MainActivity.this);
             chips.setOrientation(LinearLayout.HORIZONTAL);
@@ -2335,9 +2336,9 @@ public class MainActivity extends Activity {
                 final String cv = chipVals[i];
                 TextView c = tv(cv, 14, true, col("accent"));
                 c.setGravity(Gravity.CENTER);
-                c.setBackground(rounded(Color.argb(26, Color.red(col("accent")), Color.green(col("accent")), Color.blue(col("accent"))), 14));
-                LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(0, dp(34), 1);
-                clp2.setMargins(dp(3), 0, dp(3), 0);
+                c.setBackground(rounded(Color.argb(26, Color.red(col("accent")), Color.green(col("accent")), Color.blue(col("accent"))), 16));
+                LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(0, dp(38), 1);
+                clp2.setMargins(dp(4), 0, dp(4), 0);
                 chips.addView(pressScale(c), clp2);
                 c.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
@@ -2364,9 +2365,13 @@ public class MainActivity extends Activity {
             cslp.setMargins(0, dp(16), 0, 0);
             card.addView(pressScale(convShare), cslp);
 
-            TextView note = tv("USD y EUR usan la tasa oficial del BCV. USDT usa Binance P2P.", 12, false, col("text_secondary"));
+            TextView note = tv(S("USD y EUR usan la tasa oficial del BCV. USDT usa Binance P2P.", "USD and EUR use the official BCV rate. USDT uses Binance P2P."), 12, false, col("text_secondary"));
             note.setPadding(0, dp(14), 0, 0);
             card.addView(note);
+
+            // Estado inicial del carrusel USD/EUR/USDT (sin esto ningún modo aparece seleccionado al abrir la app)
+            styleSeg();
+            recompute();
         }
 
         private void styleSeg() {
