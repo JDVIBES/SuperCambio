@@ -75,6 +75,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -117,6 +118,7 @@ public class MainActivity extends Activity {
     private volatile boolean dlCancel = false;
     private static final int REQ_INSTALL = 4001;
     private static final int REQ_PICK_JSON = 5001;
+    private static final int REQ_SAVE_JSON = 5002;
     private boolean langEn = false;
     private boolean dailyNotif = false;
 
@@ -946,20 +948,13 @@ public class MainActivity extends Activity {
 
     private void exportProfiles() {
         try {
-            String json = "{\"app\":\"supercambio\",\"v\":1,\"perfiles\":" + loadProfiles().toString() + "}";
-            File f = new File(getCacheDir(), "perfiles_backup.json");
-            FileOutputStream fo = new FileOutputStream(f);
-            fo.write(json.getBytes(StandardCharsets.UTF_8));
-            fo.close();
-            Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/perfiles_backup.json");
-            Intent it = new Intent(Intent.ACTION_SEND);
+            Intent it = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            it.addCategory(Intent.CATEGORY_OPENABLE);
             it.setType("application/json");
-            it.putExtra(Intent.EXTRA_STREAM, uri);
-            it.putExtra(Intent.EXTRA_TEXT, json);
-            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(it, S("Exportar perfiles", "Export profiles")));
+            it.putExtra(Intent.EXTRA_TITLE, "perfiles_backup.json");
+            startActivityForResult(it, REQ_SAVE_JSON);
         } catch (Exception e) {
-            Toast.makeText(this, S("No se pudo exportar", "Couldn't export"), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, S("No se encontró un gestor de archivos", "No file manager found"), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -3725,6 +3720,20 @@ public class MainActivity extends Activity {
                 Toast.makeText(this, S("No se pudo leer el archivo", "Couldn't read the file"), Toast.LENGTH_SHORT).show();
             } finally {
                 if (in != null) { try { in.close(); } catch (Exception ignored) { } }
+            }
+        }
+        if (requestCode == REQ_SAVE_JSON && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            OutputStream out = null;
+            try {
+                String json = "{\"app\":\"supercambio\",\"v\":1,\"perfiles\":" + loadProfiles().toString() + "}";
+                out = getContentResolver().openOutputStream(data.getData());
+                out.write(json.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                Toast.makeText(this, S("✅ Respaldo guardado", "✅ Backup saved"), Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, S("No se pudo guardar", "Couldn't save"), Toast.LENGTH_SHORT).show();
+            } finally {
+                if (out != null) { try { out.close(); } catch (Exception ignored) { } }
             }
         }
     }
