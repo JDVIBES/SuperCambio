@@ -176,6 +176,13 @@ public class MainActivity extends Activity {
         updUrl = p.getString("upd_url", "");
         updNotes = p.getString("upd_notes", "");
         updSize = p.getLong("upd_size", 0);
+        // Si el tag guardado ya está instalado, limpiarlo para que NO salga el popup al abrir
+        if (updTag.length() > 0 && !isNewerVersion(updTag, currentVersionName())) {
+            updTag = "";
+            SharedPreferences.Editor e0 = p.edit();
+            e0.putString("upd_tag", "");
+            e0.apply();
+        }
 
         // Pantallas de alta frecuencia (hasta 120 Hz, mejor esfuerzo)
         try {
@@ -2320,12 +2327,14 @@ public class MainActivity extends Activity {
             card.addView(swapWrap, swLp);
 
             int acc = col("accent");
-            TextView swap = tv("⇅", 18, true, acc);
-            swap.setGravity(Gravity.CENTER);
-            swap.setBackground(rounded(Color.argb(36, Color.red(acc), Color.green(acc), Color.blue(acc)), 999));
+            ImageView swapIv = new ImageView(MainActivity.this);
+            swapIv.setImageResource(R.drawable.ic_swap);
+            swapIv.setColorFilter(acc, android.graphics.PorterDuff.Mode.SRC_IN);
+            swapIv.setPadding(dp(11), dp(11), dp(11), dp(11));
+            swapIv.setBackground(rounded(Color.argb(36, Color.red(acc), Color.green(acc), Color.blue(acc)), 999));
             FrameLayout.LayoutParams fsw = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER);
-            swapWrap.addView(pressScale(swap), fsw);
-            swap.setOnClickListener(new View.OnClickListener() {
+            swapWrap.addView(pressScale(swapIv), fsw);
+            swapIv.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     invert = !invert;
                     haptic(v);
@@ -3112,6 +3121,7 @@ public class MainActivity extends Activity {
 
     private void updatePrompt() {
         if (updTag.length() == 0 || updUrl.length() == 0) return;
+        if (!isNewerVersion(updTag, currentVersionName())) return;
         if (promptDlg != null && promptDlg.isShowing()) return;
         if (downloadDlg != null && downloadDlg.isShowing()) return;
         final Dialog d = new Dialog(this);
