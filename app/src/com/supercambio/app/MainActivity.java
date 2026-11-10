@@ -3471,8 +3471,8 @@ public class MainActivity extends Activity {
         btns.setPadding(0, 0, 0, 0);
         LinearLayout.LayoutParams btnsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         btnsLp.setMargins(0, dp(18), 0, 0);
-        btns.addView(btnNo(d), lpBtn(1, 0, 0, 0));
-        btns.addView(btnDownload(d), lpBtn(3, dp(12), 0, 0));
+        btns.addView(btnNo(d), lpBtn(2, 0, 0, 0));
+        btns.addView(btnDownload(d), lpBtn(3, dp(10), 0, 0));
         c.addView(btns, btnsLp);
 
         d.setContentView(c, new ViewGroup.LayoutParams(dp(330), ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -3491,8 +3491,8 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER);
         b.setBackground(rounded(col("input_bg"), 23));
         b.setMinHeight(dp(46));
-        b.setPadding(dp(10), 0, dp(10), 0);
-        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(8), 0, dp(8), 0);
+        b.setSingleLine(true);
         b.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 haptic(v);
@@ -3508,7 +3508,7 @@ public class MainActivity extends Activity {
         b.setBackground(rounded(col("accent"), 23));
         b.setMinHeight(dp(46));
         b.setPadding(dp(10), 0, dp(10), 0);
-        b.setGravity(Gravity.CENTER);
+        b.setSingleLine(true);
         b.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 haptic(v);
