@@ -32,6 +32,7 @@ public class ShareProvider extends ContentProvider {
     public String getType(Uri uri) {
         String name = uri.getLastPathSegment();
         if (name != null && name.endsWith(".json")) return "application/json";
+        if (name != null && name.endsWith(".apk")) return "application/vnd.android.package-archive";
         return "image/png";
     }
 

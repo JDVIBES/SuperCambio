@@ -53,6 +53,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -98,6 +99,10 @@ public class MainActivity extends Activity {
     private boolean darkLogo = false;
     private boolean hapticsOn = true;
     private int accentIdx = 0;
+    private boolean updBusy = false;
+    private String updTag = "", updUrl = "", updNotes = "";
+    private TextView updateTitle, updateSub;
+    private long updSize = 0;
     private boolean langEn = false;
     private boolean dailyNotif = false;
 
@@ -160,6 +165,10 @@ public class MainActivity extends Activity {
         dailyNotif = p.getBoolean("daily_notif", false);
         accentIdx = p.getInt("accent_idx", 0);
         langEn = p.getBoolean("lang_en", false);
+        updTag = p.getString("upd_tag", "");
+        updUrl = p.getString("upd_url", "");
+        updNotes = p.getString("upd_notes", "");
+        updSize = p.getLong("upd_size", 0);
 
         // Pantallas de alta frecuencia (hasta 120 Hz, mejor esfuerzo)
         try {
@@ -176,6 +185,7 @@ public class MainActivity extends Activity {
         if (dailyNotif) RateAlarm.schedule(this, true);
         refresh();
         syncSharedHist(false);
+        checkForUpdates(false);
     }
 
     private boolean isDark() {
@@ -2719,6 +2729,30 @@ public class MainActivity extends Activity {
         hapRow.addView(hapSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // Créditos
+        box.addView(sectionLabel(S("Actualizaciones", "Updates")));
+        LinearLayout updCard = card(box);
+        LinearLayout updRow = rowBase(updCard,
+                updTag.length() > 0 ? S("⬇️ Nueva versión disponible: ", "⬇️ New version available: ") + updTag : S("Buscar actualizaciones", "Check for updates"),
+                updTag.length() > 0 ? S("Toca para descargar e instalar", "Tap to download and install") : S("Versión actual: ", "Current version: ") + currentVersionName(),
+                false);
+        try {
+            ViewGroup rowCol = (ViewGroup) updRow.getChildAt(0);
+            updateTitle = (TextView) rowCol.getChildAt(0);
+            if (rowCol.getChildCount() > 1) updateSub = (TextView) rowCol.getChildAt(1);
+        } catch (Exception ignored) { }
+        if (updTag.length() > 0 && updateTitle != null) {
+            updateTitle.setTextColor(col("green"));
+        }
+        updRow.setClickable(true);
+        pressScale(updRow);
+        updRow.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                haptic(v);
+                if (updTag.length() > 0) downloadScreen();
+                else checkForUpdates(true);
+            }
+        });
+
         box.addView(sectionLabel(S("Créditos", "Credits")));
         LinearLayout credCard = card(box);
         rowInfo(credCard, S("Desarrollo y diseño", "Development & design"), "Jdvibes", true);
@@ -2785,6 +2819,7 @@ public class MainActivity extends Activity {
             selectTab(keepTab < 0 ? 0 : keepTab);
             updateAllPages();
             blurAfterLayout();
+            paintUpdateBadge();
         } catch (Throwable t) {
             buildUi();
             currentTab = -1;
@@ -3033,6 +3068,227 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    // ===== Actualizaciones desde GitHub =====
+
+    private void downloadScreen() {
+        if (updUrl == null || updUrl.length() == 0 || updTag == null || updTag.length() == 0) {
+            Toast.makeText(this, S("No hay descarga disponible", "No download available"), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String fileName = "actualizar-" + updTag + ".apk";
+        final Dialog d = new Dialog(this);
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        int p0 = dp(20);
+        c.setPadding(p0, p0, p0, p0);
+        c.setBackground(rounded(col("card_bg"), 24));
+
+        TextView t = tv(S("⬇️ Descargar Super Cambio ", "⬇️ Download Super Cambio ") + updTag, 18, true, col("text_primary"));
+        c.addView(t);
+        c.addView(tv(S("Se descargará la versión ", "Version ") + updTag + S(" desde GitHub", " will be downloaded from GitHub"), 13, false, col("text_secondary")),
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final ProgressBar pb = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        try { pb.getProgressDrawable().setColorFilter(col("accent"), android.graphics.PorterDuff.Mode.SRC_IN); } catch (Exception ignored) { }
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pbLp.setMargins(0, dp(14), 0, 0);
+        c.addView(pb, pbLp);
+
+        final TextView pct = tv("0%", 13, true, col("text_secondary"));
+        pct.setGravity(Gravity.CENTER);
+        c.addView(pct, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        if (updNotes != null && updNotes.length() > 0) {
+            TextView nl = tv(S("Novedades:", "What's new:"), 13, true, col("text_primary"));
+            LinearLayout.LayoutParams nlLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            nlLp.setMargins(0, dp(12), 0, 0);
+            c.addView(nl, nlLp);
+            ScrollView ns = new ScrollView(this);
+            ns.setVerticalScrollBarEnabled(false);
+            TextView notes = tv(updNotes, 12, false, col("text_secondary"));
+            ns.addView(notes, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams nsLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(190));
+            nsLp.setMargins(0, dp(4), 0, 0);
+            c.addView(ns, nsLp);
+        }
+
+        TextView cancel = tv(S("Cancelar", "Cancel"), 14, true, col("red"));
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setPadding(0, dp(14), 0, 0);
+        cancel.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { d.dismiss(); }
+        });
+        c.addView(cancel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        d.setContentView(c, new ViewGroup.LayoutParams(dp(330), ViewGroup.LayoutParams.WRAP_CONTENT));
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.dimAmount = 0.45f;
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
+        d.show();
+
+        new Thread(new Runnable() {
+            public void run() {
+                boolean ok = false;
+                try {
+                    HttpURLConnection conn = (HttpURLConnection) new URL(updUrl).openConnection();
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(30000);
+                    conn.setRequestProperty("User-Agent", "SuperCambio/" + currentVersionName() + " (Android)");
+                    conn.connect();
+                    long len = conn.getContentLength();
+                    InputStream in = conn.getInputStream();
+                    File out = new File(getCacheDir(), fileName);
+                    FileOutputStream fo = new FileOutputStream(out);
+                    byte[] buf = new byte[8192];
+                    long total = 0;
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        fo.write(buf, 0, n);
+                        total += n;
+                        if (len > 0) {
+                            final int pc = (int) (total * 100 / len);
+                            final String st = fmtMB(total) + S(" de ", " of ") + fmtMB(len);
+                            ui.post(new Runnable() {
+                                public void run() { pb.setProgress(pc); pct.setText(pc + "% · " + st); }
+                            });
+                        }
+                    }
+                    fo.close();
+                    in.close();
+                    conn.disconnect();
+                    ok = total > 0;
+                } catch (Exception ignored) { }
+                final boolean fOk = ok;
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (!fOk) {
+                            pct.setText(S("❌ Error de descarga · revisa tu conexión", "❌ Download failed · check your connection"));
+                            return;
+                        }
+                        pct.setText(S("✅ Descarga completa · abriendo instalador…", "✅ Download complete · opening installer…"));
+                        try {
+                            Intent it = new Intent(Intent.ACTION_VIEW);
+                            it.setDataAndType(Uri.parse("content://" + ShareProvider.AUTHORITY + "/" + fileName),
+                                    "application/vnd.android.package-archive");
+                            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                            startActivity(it);
+                            d.dismiss();
+                        } catch (Exception e) {
+                            Toast.makeText(MainActivity.this, S("No se pudo abrir el instalador", "Couldn't open the installer"), Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private String fmtMB(long bytes) {
+        double mb = bytes / 1048576.0;
+        if (mb < 1.0) return String.format(new Locale("es", "VE"), "%.0f KB", bytes / 1024.0);
+        return String.format(new Locale("es", "VE"), "%.1f MB", mb);
+    }
+
+    private String currentVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "0.0.0";
+        }
+    }
+
+    private boolean isNewerVersion(String remote, String cur) {
+        try {
+            String[] a = remote.replace("v", "").replace("V", "").trim().split("\\.");
+            String[] b = cur.replace("v", "").replace("V", "").trim().split("\\.");
+            int n = Math.max(a.length, b.length);
+            for (int i = 0; i < n; i++) {
+                int x = i < a.length ? Integer.parseInt(a[i].trim()) : 0;
+                int y = i < b.length ? Integer.parseInt(b[i].trim()) : 0;
+                if (x != y) return x > y;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+        return false;
+    }
+
+    private void checkForUpdates(final boolean manual) {
+        SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        long now = System.currentTimeMillis();
+        if (updBusy || (!manual && now - p.getLong("upd_last", 0) < 3600000L)) return;
+        updBusy = true;
+        new Thread(new Runnable() {
+            public void run() {
+                String tag = "", url = "", notes = "";
+                long size = 0;
+                try {
+                    JSONObject r = new JSONObject(httpGet("https://api.github.com/repos/JDVIBES/SuperCambio/releases/latest"));
+                    tag = r.optString("tag_name", "").replaceFirst("^v", "");
+                    notes = r.optString("body", "");
+                    JSONArray assets = r.optJSONArray("assets");
+                    if (assets != null && assets.length() > 0) {
+                        url = assets.getJSONObject(0).optString("browser_download_url", "");
+                        size = assets.getJSONObject(0).optLong("size", 0);
+                    }
+                } catch (Exception ignored) { }
+                final String fTag = tag, fUrl = url, fNotes = notes;
+                final long fSize = size;
+                final boolean isNew = fTag.length() > 0 && isNewerVersion(fTag, currentVersionName());
+                ui.post(new Runnable() {
+                    public void run() {
+                        updBusy = false;
+                        SharedPreferences.Editor e = getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+                        e.putLong("upd_last", System.currentTimeMillis());
+                        e.putString("upd_tag", isNew ? fTag : "");
+                        e.putString("upd_url", fUrl);
+                        e.putString("upd_notes", fNotes);
+                        e.putLong("upd_size", fSize);
+                        e.apply();
+                        updTag = isNew ? fTag : "";
+                        updUrl = fUrl;
+                        updNotes = fNotes;
+                        updSize = fSize;
+                        paintUpdateRow();
+                        paintUpdateBadge();
+                        if (manual) {
+                            Toast.makeText(MainActivity.this,
+                                    isNew ? S("🔔 Nueva versión disponible: ", "🔔 New version available: ") + fTag
+                                          : S("✅ Ya tienes la última versión", "✅ You're up to date"),
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void paintUpdateBadge() {
+        try {
+            if (tabLabels != null && tabLabels[4] != null) {
+                tabLabels[4].setText(S("Acerca", "About") + (updTag.length() > 0 ? " •" : ""));
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void paintUpdateRow() {
+        try {
+            if (updateTitle == null || updateSub == null) return;
+            if (updTag.length() > 0) {
+                updateTitle.setText(S("⬇️ Nueva versión disponible: ", "⬇️ New version available: ") + updTag);
+                updateTitle.setTextColor(col("green"));
+                updateSub.setText(S("Toca para descargar e instalar", "Tap to download and install"));
+            } else {
+                updateTitle.setText(S("Buscar actualizaciones", "Check for updates"));
+                updateTitle.setTextColor(col("text_primary"));
+                updateSub.setText(S("Versión actual: ", "Current version: ") + currentVersionName());
+            }
+        } catch (Exception ignored) { }
     }
 
     // ===== Historial compartido entre usuarios =====
