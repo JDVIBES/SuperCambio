@@ -97,6 +97,8 @@ public class MainActivity extends Activity {
     private boolean blurOn = false;
     private boolean darkLogo = false;
     private boolean hapticsOn = true;
+    private int accentIdx = 0;
+    private boolean langEn = false;
     private boolean dailyNotif = false;
 
     private double bcvUsd, bcvEur, usdt, paralelo;
@@ -156,6 +158,8 @@ public class MainActivity extends Activity {
         darkLogo = p.getBoolean("dark_logo", false);
         hapticsOn = p.getBoolean("haptics_on", true);
         dailyNotif = p.getBoolean("daily_notif", false);
+        accentIdx = p.getInt("accent_idx", 0);
+        langEn = p.getBoolean("lang_en", false);
 
         // Pantallas de alta frecuencia (hasta 120 Hz, mejor esfuerzo)
         try {
@@ -187,7 +191,10 @@ public class MainActivity extends Activity {
         if (key.equals("card_bg")) return resColor(dark ? R.color.dark_card_bg : R.color.light_card_bg);
         if (key.equals("text_primary")) return resColor(dark ? R.color.dark_text_primary : R.color.light_text_primary);
         if (key.equals("text_secondary")) return resColor(dark ? R.color.dark_text_secondary : R.color.light_text_secondary);
-        if (key.equals("accent")) return resColor(dark ? R.color.dark_accent : R.color.light_accent);
+        if (key.equals("accent")) {
+            int[] ac = accentColors();
+            return ac[dark ? 1 : 0];
+        }
         if (key.equals("green")) return resColor(dark ? R.color.dark_green : R.color.light_green);
         if (key.equals("orange")) return resColor(dark ? R.color.dark_orange : R.color.light_orange);
         if (key.equals("purple")) return resColor(dark ? R.color.dark_purple : R.color.light_purple);
@@ -321,6 +328,8 @@ public class MainActivity extends Activity {
         e.putBoolean("dark_logo", darkLogo);
         e.putBoolean("haptics_on", hapticsOn);
         e.putBoolean("daily_notif", dailyNotif);
+        e.putInt("accent_idx", accentIdx);
+        e.putBoolean("lang_en", langEn);
         e.putLong("usd", Double.doubleToRawLongBits(bcvUsd));
         e.putLong("eur", Double.doubleToRawLongBits(bcvEur));
         e.putLong("usdt", Double.doubleToRawLongBits(usdt));
@@ -452,7 +461,7 @@ public class MainActivity extends Activity {
         barContent.setOrientation(LinearLayout.HORIZONTAL);
         floatingBar.addView(barContent, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        String[] names = {"Tasas", "Gráficas", "Conversor", "Pagos", "Acerca"};
+        String[] names = new String[]{ S("Tasas", "Rates"), S("Gráficas", "Charts"), S("Conversor", "Convert"), S("Pagos", "Pay"), S("Acerca", "About") };
         int[] icons = {R.drawable.ic_tab_rates, R.drawable.ic_tab_charts, R.drawable.ic_tab_conv, R.drawable.ic_tab_pay, R.drawable.ic_tab_about};
         tabBtns = new LinearLayout[5];
         tabIcons = new ImageView[5];
@@ -733,7 +742,7 @@ public class MainActivity extends Activity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         if (profIdx >= 0) {
-            TextView del = tv("Eliminar", 14, true, col("red"));
+            TextView del = tv(S("Eliminar", "Delete"), 14, true, col("red"));
             del.setPadding(0, dp(14), dp(16), dp(4));
             del.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { closeSheet(); confirmDelete(profIdx); }
@@ -764,7 +773,7 @@ public class MainActivity extends Activity {
                     else a.put(prof);
                     saveProfiles(a);
                     closeSheet();
-                    Toast.makeText(MainActivity.this, "Perfil guardado", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, S("Perfil guardado", "Profile saved"), Toast.LENGTH_SHORT).show();
                 } catch (Exception ignored) {}
             }
         });
@@ -783,22 +792,31 @@ public class MainActivity extends Activity {
                 if (tmp != null) v = tmp;
             }
         }
-        final LinearLayout c = sheet((profIdx >= 0 ? "Editar · " : "Nuevo · ") + PAY_TYPES[t][1]);
-        for (int i = 0; i < fields.length; i++) etField(c, fields[i], v.optString(fields[i], ""));
+        final LinearLayout c = sheet((profIdx >= 0 ? S("Editar · ", "Edit · ") : S("Nuevo · ", "New · ")) + ptName(t));
+        for (int i = 0; i < fields.length; i++) {
+            final int fi = i;
+            final EditText fe = etField(c, ptField(t, i), v.optString(fields[i], ""));
+            TextView cp = tv(S("⧉ Copiar", "⧉ Copy"), 12, true, col("accent"));
+            cp.setPadding(dp(2), 0, 0, dp(10));
+            cp.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View vv) { copyClip(ptField(t, fi), fe.getText().toString(), fe); }
+            });
+            c.addView(cp);
+        }
         sheetActions(c, t, profIdx);
     }
 
     private void confirmDelete(final int idx) {
-        final LinearLayout c = sheet("Eliminar perfil");
-        c.addView(tv("¿Seguro que quieres eliminar este perfil?", 14, false, col("text_secondary")));
+        final LinearLayout c = sheet(S("Eliminar perfil", "Delete profile"));
+        c.addView(tv(S("¿Seguro que quieres eliminar este perfil?", "Delete this profile?"), 14, false, col("text_secondary")));
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.END);
-        TextView no = tv("Cancelar", 14, true, col("text_secondary"));
+        TextView no = tv(S("Cancelar", "Cancel"), 14, true, col("text_secondary"));
         no.setPadding(dp(16), dp(14), dp(16), dp(4));
         no.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { closeSheet(); }
         });
-        TextView yes = tv("Eliminar", 14, true, col("red"));
+        TextView yes = tv(S("Eliminar", "Delete"), 14, true, col("red"));
         yes.setPadding(dp(16), dp(14), 0, dp(4));
         yes.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -807,7 +825,7 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < a.length(); i++) if (i != idx) b.put(a.opt(i));
                 saveProfiles(b);
                 closeSheet();
-                Toast.makeText(MainActivity.this, "Perfil eliminado", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, S("Perfil eliminado", "Profile deleted"), Toast.LENGTH_SHORT).show();
             }
         });
         row.addView(no);
@@ -816,8 +834,8 @@ public class MainActivity extends Activity {
     }
 
     private void showTypeChooser() {
-        final LinearLayout c = sheet("Nuevo perfil");
-        c.addView(tv("Elige el tipo de perfil", 13, false, col("text_secondary")));
+        final LinearLayout c = sheet(S("Nuevo perfil", "New profile"));
+        c.addView(tv(S("Elige el tipo de perfil", "Choose a profile type"), 13, false, col("text_secondary")));
         for (int i = 0; i < PAY_TYPES.length; i++) {
             final int ti = i;
             LinearLayout row = new LinearLayout(this);
@@ -829,7 +847,7 @@ public class MainActivity extends Activity {
             b.setGravity(Gravity.CENTER);
             b.setBackground(rounded(col(PAY_TYPES[i][3]), 10));
             row.addView(b, new LinearLayout.LayoutParams(dp(34), dp(34)));
-            TextView nm = tv(PAY_TYPES[i][1], 15, true, col("text_primary"));
+            TextView nm = tv(ptName(i), 15, true, col("text_primary"));
             LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
             nlp.setMargins(dp(12), 0, 0, 0);
             row.addView(nm, nlp);
@@ -840,6 +858,76 @@ public class MainActivity extends Activity {
             rlp.setMargins(0, dp(8), 0, 0);
             c.addView(row, rlp);
         }
+    }
+
+    private void exportProfiles() {
+        try {
+            String json = "{\"app\":\"supercambio\",\"v\":1,\"perfiles\":" + loadProfiles().toString() + "}";
+            File f = new File(getCacheDir(), "perfiles_backup.json");
+            FileOutputStream fo = new FileOutputStream(f);
+            fo.write(json.getBytes(StandardCharsets.UTF_8));
+            fo.close();
+            Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/perfiles_backup.json");
+            Intent it = new Intent(Intent.ACTION_SEND);
+            it.setType("application/json");
+            it.putExtra(Intent.EXTRA_STREAM, uri);
+            it.putExtra(Intent.EXTRA_TEXT, json);
+            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(it, S("Exportar perfiles", "Export profiles")));
+        } catch (Exception e) {
+            Toast.makeText(this, S("No se pudo exportar", "Couldn't export"), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void importProfiles() {
+        final LinearLayout c = sheet(S("Importar perfiles", "Import profiles"));
+        c.addView(tv(S("Pega aquí el contenido del respaldo (JSON) y toca Importar.", "Paste the backup content (JSON) and tap Import."), 12, false, col("text_secondary")));
+        final EditText e = new EditText(this);
+        e.setSingleLine(false);
+        e.setMinLines(4);
+        e.setGravity(Gravity.TOP);
+        e.setTextColor(col("text_primary"));
+        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        e.setBackground(rounded(col("input_bg"), 12));
+        e.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(140));
+        elp.setMargins(0, dp(10), 0, dp(6));
+        c.addView(e, elp);
+        TextView go = tv(S("Importar", "Import"), 15, true, col("accent"));
+        go.setGravity(Gravity.END);
+        go.setPadding(0, dp(10), dp(4), dp(4));
+        go.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View vv) {
+                try {
+                    String raw = e.getText().toString().trim();
+                    if (raw.length() == 0) {
+                        Toast.makeText(MainActivity.this, S("Nada que importar", "Nothing to import"), Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    JSONArray a;
+                    JSONObject wrap = null;
+                    try { wrap = new JSONObject(raw); } catch (Exception ex) { }
+                    if (wrap != null && wrap.has("perfiles")) a = wrap.optJSONArray("perfiles");
+                    else a = new JSONArray(raw);
+                    JSONArray clean = new JSONArray();
+                    for (int i = 0; i < a.length(); i++) {
+                        JSONObject o = a.optJSONObject(i);
+                        if (o != null && o.has("t") && o.has("v")) clean.put(o);
+                    }
+                    if (clean.length() == 0) {
+                        Toast.makeText(MainActivity.this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    saveProfiles(clean);
+                    closeSheet();
+                    pageProfiles.refresh();
+                    Toast.makeText(MainActivity.this, clean.length() + S(" perfiles importados", " profiles imported"), Toast.LENGTH_SHORT).show();
+                } catch (Exception ex) {
+                    Toast.makeText(MainActivity.this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        c.addView(go);
     }
 
     private class PageProfiles {
@@ -861,11 +949,11 @@ public class MainActivity extends Activity {
             box.setPadding(pad, dp(8), pad, dp(110));
             root.addView(box, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            box.addView(tv("Pagos", 28, true, col("text_primary")));
-            box.addView(tv("Tus perfiles de cobro, guardados solo en este teléfono.", 13, false, col("text_secondary")));
+            box.addView(tv(S("Pagos", "Pay"), 28, true, col("text_primary")));
+            box.addView(tv(S("Tus perfiles de cobro, guardados solo en este teléfono.", "Your payment profiles, stored only on this phone."), 13, false, col("text_secondary")));
 
             Button addBtn = new Button(MainActivity.this);
-            addBtn.setText("＋ Agregar perfil");
+            addBtn.setText(S("＋ Agregar perfil", "＋ Add profile"));
             addBtn.setTextColor(Color.WHITE);
             addBtn.setTextSize(15);
             addBtn.setTypeface(TF_MED);
@@ -879,11 +967,36 @@ public class MainActivity extends Activity {
             ablp.setMargins(0, dp(16), 0, dp(8));
             box.addView(pressScale(addBtn), ablp);
 
+            // Respaldo de perfiles
+            LinearLayout bkRow = new LinearLayout(MainActivity.this);
+            bkRow.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            bkLp.setMargins(0, dp(4), 0, dp(4));
+            box.addView(bkRow, bkLp);
+            TextView ex = tv(S("⇪  Exportar", "⇪  Export"), 14, true, col("accent"));
+            ex.setGravity(Gravity.CENTER);
+            ex.setBackground(rounded(col("input_bg"), 12));
+            LinearLayout.LayoutParams exLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+            exLp.setMargins(0, 0, dp(6), 0);
+            bkRow.addView(pressScale(ex), exLp);
+            ex.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { exportProfiles(); }
+            });
+            TextView im = tv(S("⥥  Importar", "⥥  Import"), 14, true, col("accent"));
+            im.setGravity(Gravity.CENTER);
+            im.setBackground(rounded(col("input_bg"), 12));
+            LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(0, dp(42), 1);
+            imLp.setMargins(dp(6), 0, 0, 0);
+            bkRow.addView(pressScale(im), imLp);
+            im.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { importProfiles(); }
+            });
+
             list = new LinearLayout(MainActivity.this);
             list.setOrientation(LinearLayout.VERTICAL);
             box.addView(list);
 
-            empty = tvIos("💳 Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", 13, false, col("text_secondary"));
+            empty = tvIos(S("💳 Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "💳 No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 13, false, col("text_secondary"));
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(40), 0, 0);
             box.addView(empty);
@@ -923,11 +1036,20 @@ public class MainActivity extends Activity {
 
             LinearLayout col = new LinearLayout(MainActivity.this);
             col.setOrientation(LinearLayout.VERTICAL);
-            col.addView(tv(PAY_TYPES[t][1], 15, true, col("text_primary")));
+            col.addView(tv(ptName(t), 15, true, col("text_primary")));
+            final String[] fieldsF = fields;
             String sub = v.optString(fields[fields.length - 1], "") + " · " + v.optString(fields[0], "");
-            TextView st = tv(sub, 13, false, col("text_secondary"));
+            final TextView st = tv(sub, 13, false, col("text_secondary"));
             st.setSingleLine(true);
             st.setEllipsize(TextUtils.TruncateAt.END);
+            st.setClickable(true);
+            st.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View vv) {
+                    JSONObject vo = o.optJSONObject("v");
+                    String val = (vo == null ? "" : vo.optString(fieldsF[0], ""));
+                    if (val.length() > 0) copyClip(ptField(t, 0), val, st);
+                }
+            });
             col.addView(st);
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
             clp.setMargins(dp(12), 0, dp(8), 0);
@@ -1024,7 +1146,7 @@ public class MainActivity extends Activity {
         vaP.setFakeBoldText(true);
         float avail = W - 2 * pad - 60;
         for (int i = 0; i < fields.length; i++) {
-            cv.drawText(fields[i], pad + 40, y, lbP);
+            cv.drawText(ptField(t, i), pad + 40, y, lbP);
             String val = v.optString(fields[i], "").isEmpty() ? "—" : v.optString(fields[i], "");
             CharSequence ell = TextUtils.ellipsize(val, vaP, avail, TextUtils.TruncateAt.END);
             cv.drawText(ell.toString(), pad + 40, y + 52, vaP);
@@ -1045,10 +1167,10 @@ public class MainActivity extends Activity {
             fo.close();
             bmp.recycle();
 
-            StringBuilder txt = new StringBuilder(PAY_TYPES[t][1]).append("\n");
+            StringBuilder txt = new StringBuilder(ptName(t)).append("\n");
             for (int i = 0; i < fields.length; i++) {
                 String val = v.optString(fields[i], "");
-                if (!val.isEmpty()) txt.append(fields[i]).append(": ").append(val).append("\n");
+                if (!val.isEmpty()) txt.append(ptField(t, i)).append(": ").append(val).append("\n");
             }
             txt.append("\nEnviado con Super Cambio");
 
@@ -1058,9 +1180,9 @@ public class MainActivity extends Activity {
             it.putExtra(Intent.EXTRA_STREAM, uri);
             it.putExtra(Intent.EXTRA_TEXT, txt.toString());
             it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(it, "Compartir perfil"));
+            startActivity(Intent.createChooser(it, S("Compartir perfil", "Share profile")));
         } catch (Exception e) {
-            Toast.makeText(this, "No se pudo generar la imagen", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, S("No se pudo generar la imagen", "Couldn't generate the image"), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1079,7 +1201,7 @@ public class MainActivity extends Activity {
 
         String[][] rows = new String[4][5]; // nombre | valor | color | badge | fuente
         rows[0] = new String[]{"Dólar BCV", fmt(bcvUsd) + " Bs.", "accent", "USD", "BCV"};
-        rows[1] = new String[]{"Dólar paralelo", fmt(paralelo) + " Bs.", "green", "USD", "Promedio"};
+        rows[1] = new String[]{S("Dólar paralelo", "Parallel dollar"), fmt(paralelo) + " Bs.", "green", "USD", "Promedio"};
         rows[2] = new String[]{"Euro BCV", fmt(bcvEur) + " Bs.", "purple", "EUR", "BCV"};
         rows[3] = new String[]{"USDT Binance", fmt(usdt) + " Bs.", "orange", "USDT", "P2P"};
 
@@ -1174,7 +1296,7 @@ public class MainActivity extends Activity {
             fo.close();
             bmp.recycle();
 
-            StringBuilder txt = new StringBuilder("Tasas de hoy en Venezuela\n");
+            StringBuilder txt = new StringBuilder(S("Tasas de hoy en Venezuela\n", "Today's rates in Venezuela\n"));
             for (int i = 0; i < 4; i++) txt.append(rows[i][0]).append(": ").append(rows[i][1]).append("\n");
             txt.append("\nEnviado con Super Cambio");
 
@@ -1186,7 +1308,7 @@ public class MainActivity extends Activity {
             it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(Intent.createChooser(it, "Compartir tasas"));
         } catch (Exception e) {
-            Toast.makeText(this, "No se pudo generar la imagen", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, S("No se pudo generar la imagen", "Couldn't generate the image"), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1349,8 +1471,8 @@ public class MainActivity extends Activity {
             box.setPadding(pad, dp(8), pad, dp(110));
             root.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            box.addView(bigTitle("Tasas"));
-            box.addView(tv("Datos en vivo de Venezuela", 15, false, col("text_secondary")));
+            box.addView(bigTitle(S("Tasas", "Rates")));
+            box.addView(tv(S("Datos en vivo de Venezuela", "Live data for Venezuela"), 15, false, col("text_secondary")));
 
             LinearLayout statusRow = new LinearLayout(MainActivity.this);
             statusRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1359,7 +1481,7 @@ public class MainActivity extends Activity {
             srlp.setMargins(0, dp(10), 0, 0);
             box.addView(statusRow, srlp);
 
-            status = tvIos("⏳ Sin datos todavía", 13, false, col("text_secondary"));
+            status = tvIos(S("⏳ Sin datos todavía", "⏳ No data yet"), 13, false, col("text_secondary"));
             statusRow.addView(status, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
             // Compartir tasas como imagen con marca
@@ -1375,7 +1497,7 @@ public class MainActivity extends Activity {
             ((LinearLayout.LayoutParams) shareBtn.getLayoutParams()).setMargins(0, 0, dp(10), 0);
 
             Button refreshBtn = new Button(MainActivity.this);
-            refreshBtn.setText("Actualizar");
+            refreshBtn.setText(S("Actualizar", "Refresh"));
             refreshBtn.setAllCaps(false);
             refreshBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
             refreshBtn.setTextColor(col("accent"));
@@ -1387,7 +1509,7 @@ public class MainActivity extends Activity {
             statusRow.addView(refreshBtn, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             // Pull-to-refresh (sin librerías de soporte)
-            final TextView pullHint = tvIos("↓  Desliza para actualizar", 12, false, col("accent"));
+            final TextView pullHint = tvIos(S("↓  Desliza para actualizar", "↓  Pull to refresh"), 12, false, col("accent"));
             pullHint.setGravity(Gravity.CENTER);
             pullHint.setVisibility(View.GONE);
             LinearLayout.LayoutParams phlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1407,7 +1529,7 @@ public class MainActivity extends Activity {
                             pull = Math.min(1f, (dy - dp(24)) / dp(80));
                             pullHint.setVisibility(View.VISIBLE);
                             pullHint.setAlpha(pull);
-                            pullHint.setText(pull >= 1f ? "↻  Suelta para actualizar" : "↓  Desliza para actualizar");
+                            pullHint.setText(pull >= 1f ? S("↻  Suelta para actualizar", "↻  Release to refresh") : S("↓  Desliza para actualizar", "↓  Pull to refresh"));
                         }
                     } else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
                         final boolean fire = armed && pull >= 1f;
@@ -1423,10 +1545,10 @@ public class MainActivity extends Activity {
                 }
             });
 
-            usd = new RateCard(box, "Dólar oficial", "BCV", "$", "green");
-            eur = new RateCard(box, "Euro oficial", "BCV", "€", "purple");
+            usd = new RateCard(box, S("Dólar oficial", "Official dollar"), S("BCV", "BCV"), "$", "green");
+            eur = new RateCard(box, S("Euro oficial", "Official euro"), S("BCV", "BCV"), "€", "purple");
             usdtc = new RateCard(box, "USDT", "Binance P2P", "₮", "orange");
-            parc = new RateCard(box, "Dólar paralelo", "Promedio de mercado", "≋", "accent");
+            parc = new RateCard(box, S("Dólar paralelo", "Parallel dollar"), S("Promedio de mercado", "Market average"), "≋", "accent");
 
             buildNextRate(usd.card);
         }
@@ -1439,7 +1561,7 @@ public class MainActivity extends Activity {
             usdCard.addView(sep, slp);
 
             nextBtn = new Button(MainActivity.this);
-            nextBtn.setText("Ver próxima tasa  ▾");
+            nextBtn.setText(S("Ver próxima tasa  ▾", "View next rate  ▾"));
             nextBtn.setAllCaps(false);
             nextBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             nextBtn.setTextColor(col("accent"));
@@ -1465,7 +1587,7 @@ public class MainActivity extends Activity {
             nextCountdown.setGravity(Gravity.CENTER);
             nextBox.addView(nextCountdown, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            nextStatus = tvIos("⏱ Estimado según el horario habitual del BCV (3:30 PM, día hábil).",
+            nextStatus = tvIos(S("⏱ Estimado según el horario habitual del BCV (3:30 PM, día hábil).", "⏱ Estimated from the BCV's usual schedule (3:30 PM, business day)."),
                     12, false, col("text_secondary"));
             nextStatus.setGravity(Gravity.CENTER);
             nextStatus.setPadding(0, dp(6), 0, 0);
@@ -1506,7 +1628,7 @@ public class MainActivity extends Activity {
             if (autoBusy) return;
             haptic(datePill);
             netErr = null;
-            datePill.setText("Consultando…");
+            datePill.setText(S("Consultando…", "Checking…"));
             datePill.setTextColor(col("accent"));
             dateAct.setEnabled(false);
             dateAct.setAlpha(0.35f);
@@ -1520,7 +1642,7 @@ public class MainActivity extends Activity {
                 nextBox.setAlpha(0f);
                 nextBox.setTranslationY(-dp(8));
                 nextBox.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(decel).start();
-                nextBtn.setText("Ocultar próxima tasa  ▴");
+                nextBtn.setText(S("Ocultar próxima tasa  ▴", "Hide next rate  ▴"));
                 updateCountdown();
                 startTicking();
             } else {
@@ -1531,7 +1653,7 @@ public class MainActivity extends Activity {
                 nextBox.animate().alpha(0f).setDuration(200).withEndAction(
                         new Runnable() { public void run() { nextBox.setVisibility(View.GONE); nextBox.setAlpha(1f); } }
                 ).start();
-                nextBtn.setText("Ver próxima tasa  ▾");
+                nextBtn.setText(S("Ver próxima tasa  ▾", "View next rate  ▾"));
                 stopTicking();
             }
         }
@@ -1562,7 +1684,7 @@ public class MainActivity extends Activity {
                 nextCountdown.setText("—");
                 nextCountdown.setTextColor(col("text_primary"));
                 datePill.setText("—");
-                nextStatus.setText("Actualiza para calcular la próxima publicación del BCV.");
+                nextStatus.setText(S("Actualiza para calcular la próxima publicación del BCV.", "Refresh to estimate the BCV's next publication."));
                 return;
             }
             long next = computeNextPublish(last);
@@ -1573,10 +1695,10 @@ public class MainActivity extends Activity {
             dstr = Character.toUpperCase(dstr.charAt(0)) + dstr.substring(1);
             if (diff <= 0) {
                 nextCountdown.setTextColor(col("text_primary"));
-                nextCountdown.setText("¡Atento!");
-                datePill.setText("👁  Ver nueva tasa");
+                nextCountdown.setText(S("¡Atento!", "Stay tuned!"));
+                datePill.setText(S("👁  Ver nueva tasa", "👁  View new rate"));
                 datePill.setTextColor(col("green"));
-                nextStatus.setText("La nueva tasa puede estar vigente desde ahora. Toca para verla.");
+                nextStatus.setText(S("La nueva tasa puede estar vigente desde ahora. Toca para verla.", "The new rate may be live now. Tap to view it."));
                 if (!autoBusy) autoFetchNextRate(false);
                 return;
             }
@@ -1585,7 +1707,7 @@ public class MainActivity extends Activity {
             dateAct.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
             nextCountdown.setTextColor(col("text_primary"));
             nextCountdown.setText(countdownText(diff));
-            nextStatus.setText("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).");
+            nextStatus.setText(S("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).", "Time left until the next publication (est. 3:30 PM, business day)."));
         }
 
         private void autoFetchNextRate(boolean force) {
@@ -1633,27 +1755,27 @@ public class MainActivity extends Activity {
                                 updateAllPages();
                                 celebrateUntil = System.currentTimeMillis() + 10000;
                                 haptic(nextCountdown);
-                                pageRates.nextStatus.setText("🎉 ¡Nueva tasa publicada!");
+                                pageRates.nextStatus.setText(S("🎉 ¡Nueva tasa publicada!", "🎉 New rate published!"));
                                 nextCountdown.setTextColor(col("green"));
                                 nextCountdown.setText("¡Nueva tasa publicada!");
                                 nextCountdown.setScaleX(1.15f);
                                 nextCountdown.setScaleY(1.15f);
                                 nextCountdown.animate().scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(pop).start();
                                 SimpleDateFormat f = new SimpleDateFormat("HH:mm", new Locale("es"));
-                                nextStatus.setText("El BCV publicó Bs. " + fmt(fRate) + " · detectado a las " + f.format(new Date()) + " (hora del teléfono)");
+                                nextStatus.setText(S("El BCV publicó Bs. ", "BCV published Bs. ") + fmt(fRate) + S(" · detectado a las ", " · detected at ") + f.format(new Date()) + S(" (hora del teléfono)", " (phone time)"));
                                 dateAct.setEnabled(true);
                                 dateAct.setAlpha(1f);
                             } else {
                                 dateAct.setEnabled(true);
                                 dateAct.setAlpha(1f);
                                 if (netErr != null) {
-                                    nextStatus.setText("Sin conexión con el BCV · revisando cada minuto…");
+                                    nextStatus.setText(S("Sin conexión con el BCV · revisando cada minuto…", "Can't reach the BCV · retrying every minute…"));
                                 } else {
                                     int dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
                                     if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) {
-                                        nextStatus.setText("El BCV no publica fines de semana · próxima tasa: lunes a las 3:30 PM");
+                                        nextStatus.setText(S("El BCV no publica fines de semana · próxima tasa: lunes a las 3:30 PM", "BCV doesn't publish on weekends · next rate: Monday at 3:30 PM"));
                                     } else {
-                                        nextStatus.setText("El BCV aún no publica la nueva tasa · revisando cada minuto…");
+                                        nextStatus.setText(S("El BCV aún no publica la nueva tasa · revisando cada minuto…", "BCV hasn't published the new rate yet · checking every minute…"));
                                     }
                                 }
                             }
@@ -1709,8 +1831,8 @@ public class MainActivity extends Activity {
             box.setPadding(pad, dp(8), pad, dp(110));
             root.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            box.addView(bigTitle("Gráficas"));
-            box.addView(tv("Evolución local de cada tasa", 15, false, col("text_secondary")));
+            box.addView(bigTitle(S("Gráficas", "Charts")));
+            box.addView(tv(S("Evolución local de cada tasa", "Local history of each rate"), 15, false, col("text_secondary")));
 
             segWrap = new LinearLayout(MainActivity.this);
             segWrap.setOrientation(LinearLayout.HORIZONTAL);
@@ -1754,7 +1876,7 @@ public class MainActivity extends Activity {
                 });
             }
 
-            chartTitle = tv("Dólar oficial", 17, true, col("text_primary"));
+            chartTitle = tv(S("Dólar oficial", "Official dollar"), 17, true, col("text_primary"));
             LinearLayout.LayoutParams ctlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             ctlp.setMargins(0, dp(18), 0, 0);
             box.addView(chartTitle, ctlp);
@@ -1777,10 +1899,10 @@ public class MainActivity extends Activity {
             stlp.setMargins(0, dp(14), 0, 0);
             box.addView(stats, stlp);
 
-            statMin = statBlock(stats, "Mínimo");
-            statMax = statBlock(stats, "Máximo");
-            statAvg = statBlock(stats, "Promedio");
-            statVar = statBlock(stats, "Variación");
+            statMin = statBlock(stats, S("Mínimo", "Min"));
+            statMax = statBlock(stats, S("Máximo", "Max"));
+            statAvg = statBlock(stats, S("Promedio", "Avg"));
+            statVar = statBlock(stats, S("Variación", "Change"));
 
             statCount = tv("", 12, false, col("text_secondary"));
             LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1808,7 +1930,7 @@ public class MainActivity extends Activity {
         }
 
         private void redraw() {
-            String[] names = {"Dólar oficial", "Euro oficial", "USDT Binance", "Dólar paralelo"};
+            String[] names = {S("Dólar oficial", "Official dollar"), S("Euro oficial", "Official euro"), "USDT Binance", S("Dólar paralelo", "Parallel dollar")};
             chartTitle.setText(names[sel]);
             for (int i = 0; i < 4; i++) {
                 TextView sv = (TextView) segWrap.getChildAt(i);
@@ -1836,7 +1958,7 @@ public class MainActivity extends Activity {
             int n = arr != null ? arr.length() : 0;
             if (n < 2) {
                 statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
-                statCount.setText(n == 0 ? "Aún no hay datos para esta tasa." : "1 punto guardado · sigue abriendo la app para acumular datos.");
+                statCount.setText(n == 0 ? S("Aún no hay datos para esta tasa.", "No data for this rate yet.") : S("1 punto guardado · sigue abriendo la app para acumular datos.", "1 saved point · keep opening the app to collect data."));
                 chart.setData(null, null);
                 chart.invalidate();
                 return;
@@ -1864,7 +1986,7 @@ public class MainActivity extends Activity {
             int m = fv.size();
             if (m < 2) {
                 statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
-                statCount.setText("Sin datos en este rango todavía.");
+                statCount.setText(S("Sin datos en este rango todavía.", "No data in this range yet."));
                 chart.setData(null, null);
                 chart.invalidate();
                 return;
@@ -1890,8 +2012,8 @@ public class MainActivity extends Activity {
             statAvg.setText(fmt(avg));
             statVar.setText((var >= 0 ? "▲ " : "▼ ") + String.format(new Locale("es", "VE"), "%.1f %%", Math.abs(var)));
             statVar.setTextColor(var >= 0 ? col("green") : col("red"));
-            String[] rLbl = {"últimos 7 días", "último mes", "últimos 3 meses", "todo el historial"};
-            statCount.setText(m + " puntos · " + rLbl[rangeSel] + " · los datos se registran en cada apertura.");
+            String[] rLbl = new String[]{ S("últimos 7 días", "last 7 days"), S("último mes", "last month"), S("últimos 3 meses", "last 3 months"), S("todo el historial", "all time") };
+            statCount.setText(m + S(" puntos · ", " points · ") + rLbl[rangeSel] + S(" · los datos se registran en cada apertura.", " · data is recorded on every open."));
             chart.setData(vals, times);
             chart.startReveal();
         }
@@ -2076,8 +2198,8 @@ public class MainActivity extends Activity {
             box.setPadding(pad, dp(8), pad, dp(110));
             root.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            box.addView(bigTitle("Conversor"));
-            box.addView(tv("Calcula rápido con la tasa del día", 15, false, col("text_secondary")));
+            box.addView(bigTitle(S("Conversor", "Convert")));
+            box.addView(tv(S("Calcula rápido con la tasa del día", "Quick math with today's rates"), 15, false, col("text_secondary")));
 
             LinearLayout card = new LinearLayout(MainActivity.this);
             card.setOrientation(LinearLayout.VERTICAL);
@@ -2163,7 +2285,7 @@ public class MainActivity extends Activity {
             colTo.setOrientation(LinearLayout.VERTICAL);
             row.addView(colTo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-            labelTo = tv("Resultado en Bs.", 13, false, col("text_secondary"));
+            labelTo = tv(S("Resultado en Bs.", "Result in Bs."), 13, false, col("text_secondary"));
             colTo.addView(labelTo);
 
             result = tv("—", 24, true, col("text_primary"));
@@ -2264,18 +2386,18 @@ public class MainActivity extends Activity {
         }
 
          void recompute() {
-            String[] fromNames = {"Monto en USD", "Monto en EUR", "Monto en USDT"};
+            String[] fromNames = new String[]{ S("Monto en USD", "Amount in USD"), S("Monto en EUR", "Amount in EUR"), S("Monto en USDT", "Amount in USDT") };
             double rate = rateSel();
             String sym = mode == 1 ? "EUR" : mode == 0 ? "USD" : "USDT";
             double amt = parseAmount(input.getText().toString());
             if (invert) {
-                labelFade(labelFrom, "Monto en Bs.");
-                labelFade(labelTo, "Resultado en " + sym);
+                labelFade(labelFrom, S("Monto en Bs.", "Amount in Bs."));
+                labelFade(labelTo, S("Resultado en ", "Result in ") + sym);
                 if (rate > 0 && amt > 0) setResultAnimated(fmt(amt / rate));
                 else setResultAnimated("—");
             } else {
                 labelFade(labelFrom, fromNames[mode]);
-                labelFade(labelTo, "Resultado en Bs.");
+                labelFade(labelTo, S("Resultado en Bs.", "Result in Bs."));
                 if (rate > 0 && amt > 0) setResultAnimated(fmt(amt * rate) + " Bs.");
                 else setResultAnimated("—");
             }
@@ -2380,7 +2502,7 @@ public class MainActivity extends Activity {
                 it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 startActivity(Intent.createChooser(it, "Compartir conversión"));
             } catch (Exception e) {
-                Toast.makeText(MainActivity.this, "No se pudo generar la imagen", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, S("No se pudo generar la imagen", "Couldn't generate the image"), Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -2427,14 +2549,53 @@ public class MainActivity extends Activity {
         head.addView(tagline);
 
         // Apariencia
-        box.addView(sectionLabel("Apariencia"));
+        box.addView(sectionLabel(S("Apariencia", "Appearance")));
         LinearLayout themeCard = card(box);
 
-        rowRadio(themeCard, "Automático (sistema)", themeMode == 0, 0);
+        rowRadio(themeCard, S("Automático (sistema)", "Automatic (system)"), themeMode == 0, 0);
         rowSep(themeCard);
-        rowRadio(themeCard, "Claro", themeMode == 1, 1);
+        rowRadio(themeCard, S("Claro", "Light"), themeMode == 1, 1);
         rowSep(themeCard);
-        rowRadio(themeCard, "Oscuro", themeMode == 2, 2);
+        rowRadio(themeCard, S("Oscuro", "Dark"), themeMode == 2, 2);
+
+        // Color de acento
+        rowSep(themeCard);
+        rowBase(themeCard, S("Color de acento", "Accent color"), null, false);
+        LinearLayout circRow = new LinearLayout(this);
+        circRow.setPadding(0, dp(2), 0, dp(10));
+        themeCard.addView(circRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        for (int i = 0; i < 5; i++) {
+            final int ai = i;
+            FrameLayout circle = new FrameLayout(this);
+            GradientDrawable cdg = new GradientDrawable();
+            cdg.setShape(GradientDrawable.OVAL);
+            int[] cc = accentColorsFor(ai);
+            cdg.setColor(cc[isDark() ? 1 : 0]);
+            circle.setBackground(cdg);
+            if (accentIdx == i) {
+                TextView chk = tv("✓", 14, true, Color.WHITE);
+                chk.setGravity(Gravity.CENTER);
+                circle.addView(chk, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            }
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(38), dp(38));
+            clp.setMargins(0, 0, dp(12), 0);
+            circRow.addView(pressScale(circle), clp);
+            circle.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (accentIdx == ai) return;
+                    accentIdx = ai;
+                    saveAll();
+                    rebuildUiAnimated();
+                    Toast.makeText(MainActivity.this, S("Color actualizado", "Color updated"), Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        // Idioma / Language
+        rowSep(themeCard);
+        rowLang(themeCard, S("Idioma: Español", "Language: Español"), !langEn, false);
+        rowSep(themeCard);
+        rowLang(themeCard, S("Language: English", "Language: English"), langEn, true);
 
         rowSep(themeCard);
         LinearLayout blurRow = new LinearLayout(this);
@@ -2446,8 +2607,8 @@ public class MainActivity extends Activity {
         LinearLayout blurCol = new LinearLayout(this);
         blurCol.setOrientation(LinearLayout.VERTICAL);
         blurRow.addView(blurCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        blurCol.addView(tv("Desenfoque en la barra", 15, false, col("text_primary")));
-        blurCol.addView(tv("Vidrio esmerilado bajo los íconos", 13, false, col("text_secondary")));
+        blurCol.addView(tv(S("Desenfoque en la barra", "Bar blur"), 15, false, col("text_primary")));
+        blurCol.addView(tv(S("Vidrio esmerilado bajo los íconos", "Frosted glass under the icons"), 13, false, col("text_secondary")));
 
         Switch blurSwitch = new Switch(this);
         blurSwitch.setChecked(blurOn);
@@ -2463,7 +2624,7 @@ public class MainActivity extends Activity {
                 saveAll();
                 applyBarBackground();
                 blurAfterLayout();
-                Toast.makeText(MainActivity.this, checked ? "Desenfoque activado" : "Desenfoque desactivado", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, checked ? S("Desenfoque activado", "Blur on") : S("Desenfoque desactivado", "Blur off"), Toast.LENGTH_SHORT).show();
             }
         });
         blurRow.addView(blurSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -2478,8 +2639,8 @@ public class MainActivity extends Activity {
         LinearLayout logoCol = new LinearLayout(this);
         logoCol.setOrientation(LinearLayout.VERTICAL);
         logoRow.addView(logoCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        logoCol.addView(tv("Logo oscuro de la app", 15, false, col("text_primary")));
-        logoCol.addView(tv("Cambia el ícono del launcher y el logo interno", 13, false, col("text_secondary")));
+        logoCol.addView(tv(S("Logo oscuro de la app", "Dark app logo"), 15, false, col("text_primary")));
+        logoCol.addView(tv(S("Cambia el ícono del launcher y el logo interno", "Changes the launcher icon and inner logo"), 13, false, col("text_secondary")));
 
         Switch darkLogoSwitch = new Switch(this);
         darkLogoSwitch.setChecked(darkLogo);
@@ -2495,7 +2656,7 @@ public class MainActivity extends Activity {
                 saveAll();
                 applyDarkLauncher();
                 paintAboutLogo();
-                Toast.makeText(MainActivity.this, checked ? "Logo oscuro activado" : "Logo claro activado", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, checked ? S("Logo oscuro activado", "Dark logo on") : S("Logo claro activado", "Light logo on"), Toast.LENGTH_SHORT).show();
             }
         });
         logoRow.addView(darkLogoSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -2509,8 +2670,8 @@ public class MainActivity extends Activity {
         LinearLayout notifCol = new LinearLayout(this);
         notifCol.setOrientation(LinearLayout.VERTICAL);
         notifRow.addView(notifCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        notifCol.addView(tv("Aviso diario de la tasa", 15, false, col("text_primary")));
-        notifCol.addView(tv("Todos los días a las 3:35 PM, hora de Venezuela", 13, false, col("text_secondary")));
+        notifCol.addView(tv(S("Aviso diario de la tasa", "Daily rate alert"), 15, false, col("text_primary")));
+        notifCol.addView(tv(S("Todos los días a las 3:35 PM, hora de Venezuela", "Every day at 3:35 PM, Venezuela time"), 13, false, col("text_secondary")));
         Switch notifSwitch = new Switch(this);
         notifSwitch.setChecked(dailyNotif);
         try {
@@ -2524,7 +2685,7 @@ public class MainActivity extends Activity {
                 dailyNotif = checked;
                 saveAll();
                 RateAlarm.schedule(MainActivity.this, checked);
-                Toast.makeText(MainActivity.this, checked ? "Aviso diario activado" : "Aviso diario desactivado", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, checked ? S("Aviso diario activado", "Daily alert on") : S("Aviso diario desactivado", "Daily alert off"), Toast.LENGTH_SHORT).show();
             }
         });
         notifRow.addView(notifSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -2538,8 +2699,8 @@ public class MainActivity extends Activity {
         LinearLayout hapCol = new LinearLayout(this);
         hapCol.setOrientation(LinearLayout.VERTICAL);
         hapRow.addView(hapCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        hapCol.addView(tv("Vibración al tocar", 15, false, col("text_primary")));
-        hapCol.addView(tv("Respuesta táctil sutil en botones y pestañas", 13, false, col("text_secondary")));
+        hapCol.addView(tv(S("Vibración al tocar", "Haptic feedback"), 15, false, col("text_primary")));
+        hapCol.addView(tv(S("Respuesta táctil sutil en botones y pestañas", "Subtle touch response on buttons and tabs"), 13, false, col("text_secondary")));
         Switch hapSwitch = new Switch(this);
         hapSwitch.setChecked(hapticsOn);
         try {
@@ -2552,36 +2713,36 @@ public class MainActivity extends Activity {
             public void onCheckedChanged(CompoundButton b, boolean checked) {
                 hapticsOn = checked;
                 saveAll();
-                Toast.makeText(MainActivity.this, checked ? "Vibración activada" : "Vibración desactivada", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, checked ? S("Vibración activada", "Haptics on") : S("Vibración desactivada", "Haptics off"), Toast.LENGTH_SHORT).show();
             }
         });
         hapRow.addView(hapSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         // Créditos
-        box.addView(sectionLabel("Créditos"));
+        box.addView(sectionLabel(S("Créditos", "Credits")));
         LinearLayout credCard = card(box);
-        rowInfo(credCard, "Desarrollo y diseño", "Jdvibes", true);
+        rowInfo(credCard, S("Desarrollo y diseño", "Development & design"), "Jdvibes", true);
         rowSep(credCard);
-        rowInfo(credCard, "Creación original", "App hecha de cero por Jdvibes", false);
+        rowInfo(credCard, S("Creación original", "Original creation"), S("App hecha de cero por Jdvibes", "App built from scratch by Jdvibes"), false);
         rowSep(credCard);
-        rowInfo(credCard, "Inspirada en", "La utilidad de las apps de tasas 🇻🇪", false);
+        rowInfo(credCard, S("Inspirada en", "Inspired by"), S("La utilidad de las apps de tasas 🇻🇪", "The usefulness of rate apps 🇻🇪"), false);
 
-        box.addView(sectionLabel("Fuentes de datos"));
+        box.addView(sectionLabel(S("Fuentes de datos", "Data sources")));
         LinearLayout dataCard = card(box);
-        rowLink(dataCard, "Dólar y Euro oficiales (BCV)", "ve.dolarapi.com", "https://ve.dolarapi.com");
+        rowLink(dataCard, S("Dólar y Euro oficiales (BCV)", "Official Dollar & Euro (BCV)"), "ve.dolarapi.com", "https://ve.dolarapi.com");
         rowSep(dataCard);
         rowLink(dataCard, "USDT Binance P2P", "criptoya.com", "https://criptoya.com");
         rowSep(dataCard);
-        rowInfo(dataCard, "Paralelo", "Promedio de mercado (dolarAPI)", false);
+        rowInfo(dataCard, S("Paralelo", "Parallel dollar"), S("Promedio de mercado (dolarAPI)", "Market average (dolarAPI)"), false);
 
-        box.addView(sectionLabel("Privacidad y rendimiento"));
+        box.addView(sectionLabel(S("Privacidad y rendimiento", "Privacy & performance")));
         LinearLayout privCard = card(box);
-        rowCheck(privCard, "Sin anuncios");
-        rowCheck(privCard, "Sin suscripciones ni compras");
-        rowCheck(privCard, "Sin seguimiento ni analíticas");
-        rowCheck(privCard, "Historial guardado solo en tu dispositivo");
-        rowCheck(privCard, "Historial compartido: solo cifras, sin datos personales");
-        rowCheck(privCard, "Animaciones fluidas · hasta 120 Hz");
+        rowCheck(privCard, S("Sin anuncios", "No ads"));
+        rowCheck(privCard, S("Sin suscripciones ni compras", "No subscriptions or purchases"));
+        rowCheck(privCard, S("Sin seguimiento ni analíticas", "No tracking or analytics"));
+        rowCheck(privCard, S("Historial guardado solo en tu dispositivo", "History stored only on your device"));
+        rowCheck(privCard, S("Historial compartido: solo cifras, sin datos personales", "Shared history: numbers only, no personal data"));
+        rowCheck(privCard, S("Animaciones fluidas · hasta 120 Hz", "Smooth animations · up to 120 Hz"));
 
         TextView footer = tvIos("© 2026 Jdvibes · Super Cambio\nHecho con ❤️ para Venezuela 🇻🇪", 12, false, col("text_secondary"));
         footer.setGravity(Gravity.CENTER);
@@ -2736,6 +2897,23 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { }
     }
 
+    private void rowLang(LinearLayout card, String title, boolean selected, final boolean en) {
+        LinearLayout row = rowBase(card, title, null, false);
+        row.addView(radioDot(selected), new LinearLayout.LayoutParams(dp(22), dp(22)));
+        row.setClickable(true);
+        pressScale(row);
+        row.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { setLang(en); }
+        });
+    }
+
+    private void setLang(boolean en) {
+        if (langEn == en) return;
+        langEn = en;
+        saveAll();
+        rebuildUiAnimated();
+    }
+
     private void rowRadio(LinearLayout card, String title, boolean selected, final int mode) {
         LinearLayout row = rowBase(card, title, null, false);
         row.addView(radioDot(selected), new LinearLayout.LayoutParams(dp(22), dp(22)));
@@ -2781,7 +2959,7 @@ public class MainActivity extends Activity {
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
                 } catch (Exception e) {
-                    Toast.makeText(MainActivity.this, "No se pudo abrir el enlace", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, S("No se pudo abrir el enlace", "Couldn't open the link"), Toast.LENGTH_SHORT).show();
                 }
             }
         });
@@ -2848,8 +3026,8 @@ public class MainActivity extends Activity {
                     public void run() {
                         updateAllPages();
                         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
-                        if (ok) pageRates.status.setText("✅ Actualizado: " + f.format(new Date()));
-                        else pageRates.status.setText("📴 Sin conexión · mostrando últimos datos");
+                        if (ok) pageRates.status.setText(S("✅ Actualizado: ", "✅ Updated: ") + f.format(new Date()));
+                        else pageRates.status.setText(S("📴 Sin conexión · mostrando últimos datos", "📴 Offline · showing last data"));
                         syncSharedHist(false);
                     }
                 });
@@ -3029,6 +3207,73 @@ public class MainActivity extends Activity {
         } catch (Exception e) { return 0; }
     }
 
+    private String S(String es, String en) {
+        return langEn ? en : es;
+    }
+
+    private int[] accentColorsFor(int idx) {
+        switch (idx) {
+            case 1: return new int[]{ 0xFF34C759, 0xFF30D158 };
+            case 2: return new int[]{ 0xFFAF52DE, 0xFFBF5AF2 };
+            case 3: return new int[]{ 0xFFFF9500, 0xFFFF9F0A };
+            case 4: return new int[]{ 0xFFFF2D55, 0xFFFF375F };
+            default: return new int[]{ resColor(R.color.light_accent), resColor(R.color.dark_accent) };
+        }
+    }
+
+    private int[] accentColors() {
+        return accentColorsFor(accentIdx);
+    }
+
+    private String ptName(int t) {
+        String base = PAY_TYPES[t][1];
+        if (t == 0) return S("Pago móvil", "Mobile payment");
+        if (t == 1) return S("Cuenta de banco", "Bank account");
+        return base;
+    }
+
+    private String ptField(int t, int i) {
+        String base = PAY_TYPES[t][4].split("\u0001")[i];
+        if (base.equals("Banco")) return S("Banco", "Bank");
+        if (base.equals("Teléfono")) return S("Teléfono", "Phone");
+        if (base.equals("Cédula")) return S("Cédula", "ID number");
+        if (base.equals("Titular")) return S("Titular", "Holder");
+        if (base.equals("Número de cuenta")) return S("Número de cuenta", "Account number");
+        if (base.equals("Tipo")) return S("Tipo", "Type");
+        if (base.equals("Red")) return S("Red", "Network");
+        if (base.equals("Correo o teléfono")) return S("Correo o teléfono", "Email or phone");
+        return base;
+    }
+
+    private void rebuildUiAnimated() {
+        try {
+            final int keepTab = currentTab;
+            final Bitmap snap = Bitmap.createBitmap(rootF.getWidth(), rootF.getHeight(), Bitmap.Config.ARGB_8888);
+            rootF.draw(new Canvas(snap));
+            buildUi();
+            final ImageView overlay = new ImageView(this);
+            overlay.setImageBitmap(snap);
+            overlay.setScaleType(ImageView.ScaleType.FIT_XY);
+            rootF.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.animate().alpha(0f).setDuration(420).setInterpolator(decel).withEndAction(new Runnable() {
+                public void run() {
+                    rootF.removeView(overlay);
+                    overlay.setImageDrawable(null);
+                    snap.recycle();
+                }
+            }).start();
+            currentTab = -1;
+            selectTab(keepTab < 0 ? 0 : keepTab);
+            updateAllPages();
+            blurAfterLayout();
+        } catch (Throwable tt) {
+            buildUi();
+            currentTab = -1;
+            selectTab(0);
+            updateAllPages();
+        }
+    }
+
     private void copyClip(String label, String text, View v) {
         if (text == null || text.length() == 0 || text.equals("—")) return;
         try {
@@ -3036,7 +3281,7 @@ public class MainActivity extends Activity {
             if (cm != null) {
                 cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text));
                 haptic(v);
-                Toast.makeText(this, "📋 Copiado: " + text, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, S("📋 Copiado: ", "📋 Copied: ") + text, Toast.LENGTH_SHORT).show();
             }
         } catch (Exception ignored) { }
     }

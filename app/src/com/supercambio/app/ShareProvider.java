@@ -30,6 +30,8 @@ public class ShareProvider extends ContentProvider {
 
     @Override
     public String getType(Uri uri) {
+        String name = uri.getLastPathSegment();
+        if (name != null && name.endsWith(".json")) return "application/json";
         return "image/png";
     }
 
