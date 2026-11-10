@@ -8,8 +8,8 @@
 
 Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 
-[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v2.7.0-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
-[![Versión](https://img.shields.io/badge/versión-2.7.0-success?style=flat-square)](../../releases)
+[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v2.8.0-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
+[![Versión](https://img.shields.io/badge/versión-2.8.0-success?style=flat-square)](../../releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#)
 [![Sin anuncios](https://img.shields.io/badge/100%25-sin_anuncios-orange?style=flat-square)](#)
 

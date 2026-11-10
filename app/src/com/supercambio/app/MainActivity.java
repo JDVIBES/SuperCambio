@@ -2141,8 +2141,9 @@ public class MainActivity extends Activity {
 
         // ventana visible: zoom (1 = todo el historial) y desplazamiento en unidades de punto
         private float zoom = 1f, startF = 0f;
-        private float gX0, gY0, gPan0, gSpan = -1f, lastUpX;
-        private boolean gPan, gScrollPass, gOver;
+        private float sX0, sY0, gPan0, gSpan = -1f, lastUpX, scrubX, cx0;
+        private boolean scrub, scrubPass, gOver, pan2;
+        private int scrubIdx = -1;
         private long lastUpT = 0L;
         private ScaleGestureDetector scaleDet;
 
@@ -2151,6 +2152,9 @@ public class MainActivity extends Activity {
         private Paint grid = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint lblB = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint scrV = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint scrD = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint hs = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         ChartView() {
@@ -2170,6 +2174,16 @@ public class MainActivity extends Activity {
             lblB.setColor(col("text_secondary"));
             lblB.setTextSize(dp(11.5f));
             lblB.setTypeface(TF_BOLD);
+            scrV.setColor(col("text_primary"));
+            scrV.setTextSize(dp(12f));
+            scrV.setTypeface(TF_BOLD);
+            scrD.setColor(col("text_secondary"));
+            scrD.setTextSize(dp(10f));
+            scrD.setTypeface(TF_REG);
+            hs.setStyle(Paint.Style.STROKE);
+            hs.setStrokeWidth(dp(1f));
+            hs.setColor(col("text_secondary"));
+            hs.setAlpha(70);
 
             scaleDet = new ScaleGestureDetector(MainActivity.this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
                 public boolean onScale(ScaleGestureDetector d) {
@@ -2192,11 +2206,11 @@ public class MainActivity extends Activity {
                             if (reveal != null) reveal.cancel();
                             progress = 1f;
                         }
-                        gPan = false; gScrollPass = false; gOver = false; gSpan = -1f;
-                        gX0 = ev.getX(); gY0 = ev.getY(); gPan0 = startF;
+                        scrub = false; scrubPass = false; gOver = false; pan2 = false; gSpan = -1f;
+                        sX0 = ev.getX(); sY0 = ev.getY(); gPan0 = startF;
                         long now = System.currentTimeMillis();
                         if (now - lastUpT < 350L && Math.abs(ev.getX() - lastUpX) < dp(28f)) {
-                            zoom = 1f; startF = 0f; gOver = true; invalidate();
+                            zoom = 1f; startF = 0f; scrub = false; scrubIdx = -1; gOver = true; invalidate();
                             lastUpT = 0L;
                             return true;
                         }
@@ -2208,34 +2222,50 @@ public class MainActivity extends Activity {
                         return true;
                     }
                     if (act == MotionEvent.ACTION_POINTER_DOWN) {
-                        gPan = false; gScrollPass = false; gSpan = -1f;
+                        scrub = false; scrubPass = false; pan2 = true; gSpan = -1f;
+                        cx0 = (ev.getX(0) + ev.getX(1)) / 2f;
+                        gPan0 = startF;
                         if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
+                        invalidate();
+                        return true;
+                    }
+                    if (act == MotionEvent.ACTION_POINTER_UP) {
+                        if (ev.getPointerCount() == 1) {
+                            sX0 = ev.getX(); sY0 = ev.getY(); gPan0 = startF;
+                            pan2 = false; gSpan = -1f; scrub = false; scrubPass = false;
+                            invalidate();
+                        }
                         return true;
                     }
                     if (act == MotionEvent.ACTION_MOVE) {
                         if (ev.getPointerCount() > 1) {
                             if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
                             scaleDet.onTouchEvent(ev);
+                            float cx = (ev.getX(0) + ev.getX(ev.getPointerCount() - 1)) / 2f;
+                            if (pan2) {
+                                startF = gPan0 - (cx - cx0) / Math.max(1f, getWidth() - pl() - pr()) * winNow();
+                                clampStart();
+                            }
                             invalidate();
                             return true;
                         }
-                        float dx = ev.getX() - gX0, dy = ev.getY() - gY0;
-                        if (!gPan && !gScrollPass) {
+                        float dx = ev.getX() - sX0, dy = ev.getY() - sY0;
+                        if (!scrub && !scrubPass) {
                             int slop = ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
                             if (Math.abs(dx) > slop || Math.abs(dy) > slop) {
-                                if (Math.abs(dx) > Math.abs(dy) && zoom > 1.001f) {
-                                    gPan = true;
+                                if (Math.abs(dx) >= Math.abs(dy)) {
+                                    scrub = true;
                                     if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
                                 } else {
-                                    gScrollPass = true;
+                                    scrubPass = true;
                                     if (sc != null) sc.requestDisallowInterceptTouchEvent(false);
                                 }
                             }
                         }
-                        if (gPan) {
-                            float usableW = Math.max(1f, getWidth() - pl() - pr());
-                            startF = gPan0 - (ev.getX() - gX0) / usableW * winNow();
-                            clampStart();
+                        if (scrub) {
+                            scrubX = ev.getX();
+                            scrubEdgeScroll();
+                            updScrubIdx();
                             invalidate();
                             return true;
                         }
@@ -2244,10 +2274,14 @@ public class MainActivity extends Activity {
                     if (act == MotionEvent.ACTION_UP) {
                         lastUpT = System.currentTimeMillis();
                         lastUpX = ev.getX();
+                        scrub = false;
+                        invalidate();
                         if (sc != null) sc.requestDisallowInterceptTouchEvent(false);
                         return true;
                     }
                     if (act == MotionEvent.ACTION_CANCEL) {
+                        scrub = false;
+                        invalidate();
                         if (sc != null) sc.requestDisallowInterceptTouchEvent(false);
                         return true;
                     }
@@ -2258,8 +2292,29 @@ public class MainActivity extends Activity {
 
         private float pl() { return dp(10f); }
         private float pr() { return dp(10f); }
-        private float pt() { return dp(32f); }
+        private float pt() { return dp(40f); }
         private float pb() { return dp(48f); }
+
+        private void scrubEdgeScroll() {
+            if (vals == null) return;
+            float w = getWidth();
+            float usableW = Math.max(1f, w - pl() - pr());
+            float win = winNow();
+            if (scrubX > w - pr()) startF += (scrubX - (w - pr())) / usableW * win * 0.55f;
+            else if (scrubX < pl()) startF -= (pl() - scrubX) / usableW * win * 0.55f;
+            clampStart();
+        }
+
+        private void updScrubIdx() {
+            if (vals == null) { scrubIdx = -1; return; }
+            float usableW = Math.max(1f, getWidth() - pl() - pr());
+            float win = winNow();
+            float idxF = startF + (scrubX - pl()) / usableW * win;
+            int idx = Math.round(idxF);
+            if (idx < 0) idx = 0;
+            if (idx > vals.length - 1) idx = vals.length - 1;
+            scrubIdx = idx;
+        }
 
         private float winNow() {
             if (vals == null || vals.length < 2) return 2f;
@@ -2410,6 +2465,10 @@ public class MainActivity extends Activity {
             line.setColor(trend);
             canvas.drawPath(drawPath, line);
 
+            if (scrub && scrubIdx >= iA && scrubIdx <= iB) {
+                canvas.drawLine(xs[scrubIdx - iA], padT, xs[scrubIdx - iA], plotB, hs);
+            }
+
             if (m <= 60 && progress >= 1f) {
                 dot.setColor(trend);
                 for (int i = 0; i < m; i++) {
@@ -2430,26 +2489,46 @@ public class MainActivity extends Activity {
             canvas.drawCircle(xEnd, yEnd, dp(3f), dot);
 
             // ============ etiquetas: cada una en su BANDA reservada ============
-            // máximo → banda superior (la línea nunca entra aquí: clip)
-            lblB.setTextAlign(Paint.Align.CENTER);
-            String sMax = fmt(vals[iA + iMaxK]);
-            float hwMax = lblB.measureText(sMax) / 2f + 1f;
-            float xMax = Math.min(Math.max(xs[iMaxK], padL + hwMax), w - padR - hwMax);
-            canvas.drawText(sMax, xMax, padT - dp(9), lblB);
-
-            // mínimo → banda inferior
-            String sMin = fmt(vals[iA + iMinK]);
-            float hwMin = lblB.measureText(sMin) / 2f + 1f;
-            float xMin = Math.min(Math.max(xs[iMinK], padL + hwMin), w - padR - hwMin);
-            canvas.drawText(sMin, xMin, plotB + dp(13), lblB);
-
-            // fechas del ventano visible — fila inferior separada de la etiqueta mín
             SimpleDateFormat fdf = new SimpleDateFormat("d MMM", new Locale("es"));
+            boolean sShow = scrub && scrubIdx >= 0 && scrubIdx < totalN && scrubIdx >= iA && scrubIdx <= iB;
+
+            // fechas del ventano visible — fila inferior (siempre visibles)
             txt.setTextAlign(Paint.Align.LEFT);
             canvas.drawText(fdf.format(new Date(times[iA])), padL, h - dp(10), txt);
             txt.setTextAlign(Paint.Align.RIGHT);
             canvas.drawText(fdf.format(new Date(times[iB])), w - padR, h - dp(10), txt);
             txt.setTextAlign(Paint.Align.LEFT);
+
+            if (sShow) {
+                // marcador del punto tocado
+                float mx = xs[scrubIdx - iA], my = ys[scrubIdx - iA];
+                dot.setColor(Color.WHITE);
+                canvas.drawCircle(mx, my, dp(4.8f), dot);
+                dot.setColor(trend);
+                canvas.drawCircle(mx, my, dp(3.4f), dot);
+                // burbuja en la banda superior (mín/máx ocultas: no puede pisarlas)
+                String sV = fmt(vals[scrubIdx]);
+                String sDt = fdf.format(new Date(times[scrubIdx]));
+                float hw = Math.max(scrV.measureText(sV), scrD.measureText(sDt)) / 2f + 1f;
+                float bx = Math.min(Math.max(mx, padL + hw), w - padR - hw);
+                scrV.setTextAlign(Paint.Align.CENTER);
+                scrD.setTextAlign(Paint.Align.CENTER);
+                canvas.drawText(sV, bx, padT - dp(26), scrV);
+                canvas.drawText(sDt, bx, padT - dp(10), scrD);
+            } else {
+                // máximo → banda superior (la línea nunca entra aquí: clip)
+                lblB.setTextAlign(Paint.Align.CENTER);
+                String sMax = fmt(vals[iA + iMaxK]);
+                float hwMax = lblB.measureText(sMax) / 2f + 1f;
+                float xMax = Math.min(Math.max(xs[iMaxK], padL + hwMax), w - padR - hwMax);
+                canvas.drawText(sMax, xMax, padT - dp(9), lblB);
+
+                // mínimo → banda inferior
+                String sMin = fmt(vals[iA + iMinK]);
+                float hwMin = lblB.measureText(sMin) / 2f + 1f;
+                float xMin = Math.min(Math.max(xs[iMinK], padL + hwMin), w - padR - hwMin);
+                canvas.drawText(sMin, xMin, plotB + dp(13), lblB);
+            }
         }
     }
 
