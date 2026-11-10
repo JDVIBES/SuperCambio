@@ -116,6 +116,7 @@ public class MainActivity extends Activity {
     private String pendingApkFile = "";
     private volatile boolean dlCancel = false;
     private static final int REQ_INSTALL = 4001;
+    private static final int REQ_PICK_JSON = 5001;
     private boolean langEn = false;
     private boolean dailyNotif = false;
 
@@ -963,55 +964,41 @@ public class MainActivity extends Activity {
     }
 
     private void importProfiles() {
-        final LinearLayout c = sheet(S("Importar perfiles", "Import profiles"));
-        c.addView(tv(S("Pega aquí el contenido del respaldo (JSON) y toca Importar.", "Paste the backup content (JSON) and tap Import."), 12, false, col("text_secondary")));
-        final EditText e = new EditText(this);
-        e.setSingleLine(false);
-        e.setMinLines(4);
-        e.setGravity(Gravity.TOP);
-        e.setTextColor(col("text_primary"));
-        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        e.setTypeface(TF_REG);
-        e.setBackground(rounded(col("input_bg"), 12));
-        e.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(140));
-        elp.setMargins(0, dp(10), 0, dp(6));
-        c.addView(e, elp);
-        TextView go = tv(S("Importar", "Import"), 15, true, col("accent"));
-        go.setGravity(Gravity.END);
-        go.setPadding(0, dp(10), dp(4), dp(4));
-        go.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View vv) {
-                try {
-                    String raw = e.getText().toString().trim();
-                    if (raw.length() == 0) {
-                        Toast.makeText(MainActivity.this, S("Nada que importar", "Nothing to import"), Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    JSONArray a;
-                    JSONObject wrap = null;
-                    try { wrap = new JSONObject(raw); } catch (Exception ex) { }
-                    if (wrap != null && wrap.has("perfiles")) a = wrap.optJSONArray("perfiles");
-                    else a = new JSONArray(raw);
-                    JSONArray clean = new JSONArray();
-                    for (int i = 0; i < a.length(); i++) {
-                        JSONObject o = a.optJSONObject(i);
-                        if (o != null && o.has("t") && o.has("v")) clean.put(o);
-                    }
-                    if (clean.length() == 0) {
-                        Toast.makeText(MainActivity.this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    saveProfiles(clean);
-                    closeSheet();
-                    pageProfiles.refresh();
-                    Toast.makeText(MainActivity.this, clean.length() + S(" perfiles importados", " profiles imported"), Toast.LENGTH_SHORT).show();
-                } catch (Exception ex) {
-                    Toast.makeText(MainActivity.this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
-                }
+        try {
+            Intent it = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            it.addCategory(Intent.CATEGORY_OPENABLE);
+            it.setType("*/*");
+            startActivityForResult(it, REQ_PICK_JSON);
+        } catch (Exception e) {
+            Toast.makeText(this, S("No se encontró un gestor de archivos", "No file manager found"), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // Valida y aplica un respaldo JSON de perfiles: {"perfiles":[...]} o array crudo
+    private void applyImportJson(String raw) {
+        try {
+            raw = raw.trim();
+            if (raw.length() > 0 && raw.charAt(0) == '\uFEFF') raw = raw.substring(1);
+            JSONArray a;
+            JSONObject wrap = null;
+            try { wrap = new JSONObject(raw); } catch (Exception ex) { }
+            if (wrap != null && wrap.has("perfiles")) a = wrap.optJSONArray("perfiles");
+            else a = new JSONArray(raw);
+            JSONArray clean = new JSONArray();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.optJSONObject(i);
+                if (o != null && o.has("t") && o.has("v")) clean.put(o);
             }
-        });
-        c.addView(go);
+            if (clean.length() == 0) {
+                Toast.makeText(this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
+                return;
+            }
+            saveProfiles(clean);
+            pageProfiles.refresh();
+            Toast.makeText(this, clean.length() + S(" perfiles importados", " profiles imported"), Toast.LENGTH_SHORT).show();
+        } catch (Exception ex) {
+            Toast.makeText(this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private class PageProfiles {
@@ -3723,6 +3710,22 @@ public class MainActivity extends Activity {
                 }
             }
             Toast.makeText(this, S("❌ Permiso de instalación denegado", "❌ Install permission denied"), Toast.LENGTH_LONG).show();
+        }
+        if (requestCode == REQ_PICK_JSON && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            InputStream in = null;
+            try {
+                in = getContentResolver().openInputStream(data.getData());
+                InputStreamReader rd = new InputStreamReader(in, StandardCharsets.UTF_8);
+                StringBuilder sb = new StringBuilder();
+                char[] buf = new char[8192];
+                int n;
+                while ((n = rd.read(buf)) > 0) sb.append(buf, 0, n);
+                applyImportJson(sb.toString());
+            } catch (Exception e) {
+                Toast.makeText(this, S("No se pudo leer el archivo", "Couldn't read the file"), Toast.LENGTH_SHORT).show();
+            } finally {
+                if (in != null) { try { in.close(); } catch (Exception ignored) { } }
+            }
         }
     }
 
