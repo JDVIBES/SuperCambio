@@ -1100,7 +1100,61 @@ public class MainActivity extends Activity {
 
     // ================= COMPARTIR PERFIL (imagen con marca) =================
 
-    private void shareProfile(int idx) {
+    // ===== Helpers de dibujo para las imágenes compartidas =====
+    // Inter real (no Roboto), centrado vertical EXACTO por FontMetrics y auto-fit de líneas largas.
+
+    private Paint siPaint(int colr, float size, boolean bold) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(colr);
+        p.setTextSize(size);
+        p.setTypeface(bold ? TF_BOLD : TF_MED);
+        return p;
+    }
+
+    private Paint siLight(int colr, float size) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(colr);
+        p.setTextSize(size);
+        p.setTypeface(TF_REG);
+        return p;
+    }
+
+    private void siTypeface(Paint p, boolean bold) {
+        p.setTypeface(bold ? TF_BOLD : TF_REG);
+    }
+
+    // Baseline que centra la tinta del texto en el punto vertical dado
+    private float siBase(Paint p, float centerY) {
+        Paint.FontMetrics fm = p.getFontMetrics();
+        return centerY - (fm.ascent + fm.descent) / 2f;
+    }
+
+    // Reduce el textSize hasta que el texto quepa en max px; devuelve el tamaño final
+    private float siFit(Paint p, String t, float max) {
+        float w = p.measureText(t);
+        if (w > max && w > 0) p.setTextSize(p.getTextSize() * max / w);
+        return p.getTextSize();
+    }
+
+    private void siCardShadow(Paint p) {
+        try { p.setShadowLayer(20, 0, 8, isDark() ? 0x40000000 : 0x33000000); } catch (Exception ignored) { }
+    }
+
+    // Logo real del launcher recortado con esquinas iOS; devuelve el radio usado
+    private float siLogo(Canvas cv, float cx, float cy, float r) {
+        cv.save();
+        Path clip = new Path();
+        float rad = r * 0.4474f;
+        clip.addRoundRect(new RectF(cx - r, cy - r, cx + r, cy + r), rad, rad, Path.Direction.CW);
+        cv.clipPath(clip);
+        Drawable appIc = logoDrawable();
+        appIc.setBounds((int) (cx - r), (int) (cy - r), (int) (cx + r), (int) (cy + r));
+        appIc.draw(cv);
+        cv.restore();
+        return rad;
+    }
+
+     private void shareProfile(int idx) {
         JSONArray arr = loadProfiles();
         if (idx < 0 || idx >= arr.length()) return;
         JSONObject o = arr.optJSONObject(idx);
@@ -1110,8 +1164,8 @@ public class MainActivity extends Activity {
         JSONObject v = o.optJSONObject("v");
         if (v == null) v = new JSONObject();
 
-        int W = 1000, pad = 56, headH = 170, rowH = 112, footH = 130;
-        int H = pad + headH + fields.length * rowH + footH;
+        int W = 1000, pad = 56, headH = 170, rowH = 118, footH = 130;
+        int H = pad + headH + 26 + fields.length * rowH + footH;
 
         // Paleta según el tema de la app
         boolean dk = isDark();
@@ -1127,60 +1181,48 @@ public class MainActivity extends Activity {
 
         Paint cardP = new Paint(Paint.ANTI_ALIAS_FLAG);
         cardP.setColor(cardCol);
+        siCardShadow(cardP);
         cv.drawRoundRect(pad, pad, W - pad, H - pad, 44, 44, cardP);
 
-        // Logo real de la app, recortado en círculo
+        // Logo real de la app, esquinas iOS (igual que en Tasas y Conversor)
         float cx = pad + 70, cy = pad + 78, r = 58;
-        cv.save();
-        Path clip = new Path();
-        clip.addCircle(cx, cy, r, Path.Direction.CW);
-        cv.clipPath(clip);
-        Drawable appIc = logoDrawable();
-        appIc.setBounds((int) (cx - r), (int) (cy - r), (int) (cx + r), (int) (cy + r));
-        appIc.draw(cv);
-        cv.restore();
+        siLogo(cv, cx, cy, r);
 
-        // Nombre de la app + tipo de perfil
+        // Nombre de la app + tipo de perfil (baseline centrado en su slot)
         float tx = cx + 96;
-        Paint titleP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        titleP.setColor(priCol);
-        titleP.setTextSize(52);
-        titleP.setFakeBoldText(true);
-        cv.drawText("Super Cambio", tx, pad + 62, titleP);
-        Paint typeP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        typeP.setColor(secCol);
-        typeP.setTextSize(36);
-        cv.drawText(PAY_TYPES[t][1], tx, pad + 112, typeP);
+        Paint titleP = siPaint(priCol, 50, true);
+        cv.drawText("Super Cambio", tx, siBase(titleP, pad + 56), titleP);
+        Paint typeP = siLight(secCol, 34);
+        cv.drawText(PAY_TYPES[t][1], tx, siBase(typeP, pad + 106), typeP);
 
         // Separador
         Paint sepP = new Paint();
         sepP.setColor(sepCol);
+        sepP.setStrokeWidth(3);
         cv.drawLine(pad + 40, pad + headH, W - pad - 40, pad + headH, sepP);
 
-        // Filas de datos
-        float y = pad + headH + 34;
-        Paint lbP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        lbP.setColor(secCol);
-        lbP.setTextSize(30);
+        // Filas de datos, centradas por métrica de fuente
+        float y = pad + headH + 26;
+        Paint lbP = siLight(secCol, 29);
         TextPaint vaP = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         vaP.setColor(priCol);
-        vaP.setTextSize(46);
-        vaP.setFakeBoldText(true);
-        float avail = W - 2 * pad - 60;
+        vaP.setTextSize(44);
+        vaP.setFakeBoldText(false);
+        siTypeface(vaP, true);
+        float avail = W - 2 * pad - 80;
         for (int i = 0; i < fields.length; i++) {
-            cv.drawText(ptField(t, i), pad + 40, y, lbP);
-            String val = v.optString(fields[i], "").isEmpty() ? "—" : v.optString(fields[i], "");
+            cv.drawText(ptField(t, i), pad + 40, siBase(lbP, y + 26), lbP);
+            String val = v.optString(fields[i], "").trim();
+            if (val.isEmpty()) val = S("No configurado", "Not set");
             CharSequence ell = TextUtils.ellipsize(val, vaP, avail, TextUtils.TruncateAt.END);
-            cv.drawText(ell.toString(), pad + 40, y + 52, vaP);
+            cv.drawText(ell.toString(), pad + 40, siBase(vaP, y + 76), vaP);
             y += rowH;
         }
 
         // Pie con marca
-        Paint footP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        footP.setColor(secCol);
-        footP.setTextSize(32);
+        Paint footP = siLight(secCol, 30);
         footP.setTextAlign(Paint.Align.CENTER);
-        cv.drawText("Generado con Super Cambio · © 2026 Jdvibes", W / 2f, H - pad - 36, footP);
+        cv.drawText(S("Generado con Super Cambio · © 2026 Jdvibes", "Generated with Super Cambio · © 2026 Jdvibes"), W / 2f, H - pad - 40, footP);
 
         try {
             File f = new File(getCacheDir(), "compartir.png");
@@ -1212,7 +1254,7 @@ public class MainActivity extends Activity {
 
     private void shareRates() {
         if (bcvUsd <= 0 && paralelo <= 0 && bcvEur <= 0 && usdt <= 0) {
-            Toast.makeText(this, "Aún no hay datos para compartir", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, S("Aún no hay datos para compartir", "No data to share yet"), Toast.LENGTH_SHORT).show();
             return;
         }
         boolean dk = isDark();
@@ -1228,7 +1270,7 @@ public class MainActivity extends Activity {
         rows[3] = new String[]{"USDT Binance", fmt(usdt) + " Bs.", "orange", "USDT", "P2P"};
 
         int W = 1000, pad = 56, headH = 200, rowH = 122, footH = 130;
-        int H = pad + headH + rowH * 4 + footH;
+        int H = pad + headH + 36 + rowH * 4 + footH;
 
         Bitmap bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bmp);
@@ -1236,80 +1278,68 @@ public class MainActivity extends Activity {
 
         Paint cardP = new Paint(Paint.ANTI_ALIAS_FLAG);
         cardP.setColor(cardCol);
+        siCardShadow(cardP);
         cv.drawRoundRect(pad, pad, W - pad, H - pad, 44, 44, cardP);
 
         // Logo real, esquinas redondeadas iOS
         float cx = pad + 70, cy = pad + 78, r = 58;
-        cv.save();
-        Path clip = new Path();
-        float rad = r * 0.4474f;
-        clip.addRoundRect(new RectF(cx - r, cy - r, cx + r, cy + r), rad, rad, Path.Direction.CW);
-        cv.clipPath(clip);
-        Drawable appIc = logoDrawable();
-        appIc.setBounds((int) (cx - r), (int) (cy - r), (int) (cx + r), (int) (cy + r));
-        appIc.draw(cv);
-        cv.restore();
+        siLogo(cv, cx, cy, r);
 
         float tx = cx + 96;
-        Paint titleP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        titleP.setColor(priCol);
-        titleP.setTextSize(52);
-        titleP.setFakeBoldText(true);
-        cv.drawText("Super Cambio", tx, pad + 62, titleP);
-        Paint typeP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        typeP.setColor(secCol);
-        typeP.setTextSize(36);
-        SimpleDateFormat df = new SimpleDateFormat("d 'de' MMM, yyyy", new Locale("es"));
-        cv.drawText("Tasas de hoy · " + df.format(new Date()), tx, pad + 112, typeP);
+        Paint titleP = siPaint(priCol, 50, true);
+        cv.drawText("Super Cambio", tx, siBase(titleP, pad + 56), titleP);
+        Paint typeP = siLight(secCol, 34);
+        SimpleDateFormat df = new SimpleDateFormat("d 'de' MMMM, yyyy", new Locale("es"));
+        String fecha = "Tasas de hoy · " + df.format(new Date());
+        siFit(typeP, fecha, W - tx - 40);
+        cv.drawText(fecha, tx, siBase(typeP, pad + 106), typeP);
 
         Paint sepP = new Paint();
         sepP.setColor(dk ? 0x24FFFFFF : 0x14000000);
+        sepP.setStrokeWidth(3);
         cv.drawLine(pad + 40, pad + headH, W - pad - 40, pad + headH, sepP);
 
-        Paint nmP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        nmP.setColor(priCol);
-        nmP.setTextSize(38);
-        nmP.setFakeBoldText(true);
-        Paint vaP = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint nmP = siPaint(priCol, 36, true);
+        TextPaint vaP = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         vaP.setColor(priCol);
-        vaP.setTextSize(46);
-        vaP.setFakeBoldText(true);
+        vaP.setTextSize(44);
+        vaP.setTypeface(TF_BOLD);
         vaP.setTextAlign(Paint.Align.RIGHT);
-        Paint srcP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        srcP.setColor(secCol);
-        srcP.setTextSize(28);
-        Paint bgP = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint srcP = siLight(secCol, 27);
+        float nameX = pad + 160;
+        float valX = W - pad - 44;
+        float avail = valX - nameX - 32;
 
-        float y = pad + headH + 46;
+        float y = pad + headH + 36;
         for (int i = 0; i < 4; i++) {
-            // Insignia de color
+            float rowMid = y + rowH / 2f;
+
+            // Insignia de color con el texto centrado EXACTO
             GradientDrawable bd = new GradientDrawable();
             bd.setShape(GradientDrawable.RECTANGLE);
-            bd.setCornerRadius(dp(11));
+            bd.setCornerRadius(22);
             int c = col(rows[i][2]);
             bd.setColor(Color.argb(46, Color.red(c), Color.green(c), Color.blue(c)));
-            float bx = pad + 36, by = y - 14;
+            float bx = pad + 36, by = rowMid - 48;
             bd.setBounds((int) bx, (int) by, (int) (bx + 96), (int) (by + 96));
             bd.draw(cv);
-            Paint bt = new Paint(Paint.ANTI_ALIAS_FLAG);
-            bt.setColor(c);
-            bt.setTextSize(30);
-            bt.setFakeBoldText(true);
+            Paint bt = siPaint(c, 29, true);
             bt.setTextAlign(Paint.Align.CENTER);
-            cv.drawText(rows[i][3], bx + 48, by + 60, bt);
+            cv.drawText(rows[i][3], bx + 48, siBase(bt, rowMid), bt);
 
-            cv.drawText(rows[i][0], pad + 160, y + 22, nmP);
-            cv.drawText(rows[i][4], pad + 160, y + 62, srcP);
-            cv.drawText(rows[i][1], W - pad - 44, y + 30, vaP);
-            if (i < 3) cv.drawLine(pad + 40, y + 92, W - pad - 40, y + 92, sepP);
+            // Nombre + fuente a la izquierda, valor alineado verticalmente al bloque
+            cv.drawText(rows[i][0], nameX, siBase(nmP, y + 40), nmP);
+            cv.drawText(rows[i][4], nameX, siBase(srcP, y + 84), srcP);
+            CharSequence vEll = TextUtils.ellipsize(rows[i][1], vaP, avail, TextUtils.TruncateAt.END);
+            cv.drawText(vEll.toString(), valX, siBase(vaP, rowMid), vaP);
+
+            if (i < 3) cv.drawLine(pad + 40, y + rowH - 12, W - pad - 40, y + rowH - 12, sepP);
             y += rowH;
         }
 
-        Paint footP = new Paint(Paint.ANTI_ALIAS_FLAG);
-        footP.setColor(secCol);
-        footP.setTextSize(32);
+        Paint footP = siLight(secCol, 30);
         footP.setTextAlign(Paint.Align.CENTER);
-        cv.drawText("Generado con Super Cambio · © 2026 Jdvibes", W / 2f, H - pad - 36, footP);
+        cv.drawText(S("Generado con Super Cambio · © 2026 Jdvibes", "Generated with Super Cambio · © 2026 Jdvibes"), W / 2f, H - pad - 40, footP);
 
         try {
             File f = new File(getCacheDir(), "tasas.png");
@@ -2434,13 +2464,13 @@ public class MainActivity extends Activity {
             double rate = rateSel();
             double amt = parseAmount(input.getText().toString());
             if (rate <= 0 || amt <= 0) {
-                Toast.makeText(MainActivity.this, "Escribe un monto para compartir", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, S("Escribe un monto para compartir", "Type an amount to share"), Toast.LENGTH_SHORT).show();
                 return;
             }
             String sym = mode == 1 ? "EUR" : mode == 0 ? "USD" : "USDT";
             String montoTxt = fmt(amt) + " " + sym;
             String resTxt = invert ? fmt(amt / rate) + " " + sym : fmt(amt * rate) + " Bs.";
-            String tasaTxt = "Tasa: " + fmt(rate) + " Bs. por " + sym
+            String tasaTxt = S("Tasa: ", "Rate: ") + fmt(rate) + S(" Bs. por ", " Bs. per ") + sym
                     + " · " + (mode == 2 ? "Binance P2P" : "BCV");
 
             boolean dk = isDark();
@@ -2450,8 +2480,9 @@ public class MainActivity extends Activity {
             int secCol = dk ? 0xFF98989F : 0xFF8E8E93;
             int accCol = col("accent");
 
-            int W = 1000, pad = 56, headH = 200, footH = 130;
-            int H = pad + headH + 340 + footH;
+            int W = 1000, pad = 56, headH = 200, bodyH = 380, footH = 130;
+            int H = pad + headH + bodyH + footH;
+            float maxW = W - 2 * pad - 40;
 
             Bitmap bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
             Canvas cv = new Canvas(bmp);
@@ -2459,59 +2490,46 @@ public class MainActivity extends Activity {
 
             Paint cardP = new Paint(Paint.ANTI_ALIAS_FLAG);
             cardP.setColor(cardCol);
+            siCardShadow(cardP);
             cv.drawRoundRect(pad, pad, W - pad, H - pad, 44, 44, cardP);
 
             float cx = pad + 70, cy = pad + 78, r = 58;
-            cv.save();
-            Path clip = new Path();
-            float rad = r * 0.4474f;
-            clip.addRoundRect(new RectF(cx - r, cy - r, cx + r, cy + r), rad, rad, Path.Direction.CW);
-            cv.clipPath(clip);
-            Drawable appIc = getResources().getDrawable(R.mipmap.ic_launcher);
-            appIc.setBounds((int) (cx - r), (int) (cy - r), (int) (cx + r), (int) (cy + r));
-            appIc.draw(cv);
-            cv.restore();
+            siLogo(cv, cx, cy, r);
 
             float tx = cx + 96;
-            Paint titleP = new Paint(Paint.ANTI_ALIAS_FLAG);
-            titleP.setColor(priCol);
-            titleP.setTextSize(52);
-            titleP.setFakeBoldText(true);
-            cv.drawText("Super Cambio", tx, pad + 62, titleP);
-            Paint subP = new Paint(Paint.ANTI_ALIAS_FLAG);
-            subP.setColor(secCol);
-            subP.setTextSize(36);
-            cv.drawText("Conversor de moneda", tx, pad + 112, subP);
+            Paint titleP = siPaint(priCol, 50, true);
+            cv.drawText("Super Cambio", tx, siBase(titleP, pad + 56), titleP);
+            Paint subP = siLight(secCol, 34);
+            cv.drawText("Conversor de moneda", tx, siBase(subP, pad + 106), subP);
 
             Paint sepP = new Paint();
             sepP.setColor(dk ? 0x24FFFFFF : 0x14000000);
+            sepP.setStrokeWidth(3);
             cv.drawLine(pad + 40, pad + headH, W - pad - 40, pad + headH, sepP);
 
-            float y = pad + headH + 30;
-            Paint bigP = new Paint(Paint.ANTI_ALIAS_FLAG);
-            bigP.setColor(priCol);
-            bigP.setTextSize(72);
-            bigP.setFakeBoldText(true);
-            bigP.setTextAlign(Paint.Align.CENTER);
-            Paint arrowP = new Paint(Paint.ANTI_ALIAS_FLAG);
-            arrowP.setColor(accCol);
-            arrowP.setTextSize(52);
+            float y0 = pad + headH;
+            Paint montoP = siPaint(priCol, 68, true);
+            montoP.setTextAlign(Paint.Align.CENTER);
+            Paint arrowP = siPaint(accCol, 50, true);
             arrowP.setTextAlign(Paint.Align.CENTER);
-            cv.drawText(montoTxt, W / 2f, y + 80, bigP);
-            cv.drawText("↓", W / 2f, y + 160, arrowP);
-            cv.drawText(resTxt, W / 2f, y + 250, bigP);
-
-            Paint tasaP = new Paint(Paint.ANTI_ALIAS_FLAG);
-            tasaP.setColor(secCol);
-            tasaP.setTextSize(34);
+            Paint resP = siPaint(priCol, 68, true);
+            resP.setTextAlign(Paint.Align.CENTER);
+            Paint tasaP = siLight(secCol, 32);
             tasaP.setTextAlign(Paint.Align.CENTER);
-            cv.drawText(tasaTxt, W / 2f, y + 310, tasaP);
 
-            Paint footP = new Paint(Paint.ANTI_ALIAS_FLAG);
-            footP.setColor(secCol);
-            footP.setTextSize(32);
+            // Auto-fit: montos muy largos se escalan sin salirse de la tarjeta
+            siFit(montoP, montoTxt, maxW);
+            siFit(resP, resTxt, maxW);
+            siFit(tasaP, tasaTxt, maxW);
+
+            cv.drawText(montoTxt, W / 2f, siBase(montoP, y0 + 90), montoP);
+            cv.drawText("↓", W / 2f, siBase(arrowP, y0 + 176), arrowP);
+            cv.drawText(resTxt, W / 2f, siBase(resP, y0 + 264), resP);
+            cv.drawText(tasaTxt, W / 2f, siBase(tasaP, y0 + 352), tasaP);
+
+            Paint footP = siLight(secCol, 30);
             footP.setTextAlign(Paint.Align.CENTER);
-            cv.drawText("Generado con Super Cambio · © 2026 Jdvibes", W / 2f, H - pad - 36, footP);
+            cv.drawText(S("Generado con Super Cambio · © 2026 Jdvibes", "Generated with Super Cambio · © 2026 Jdvibes"), W / 2f, H - pad - 40, footP);
 
             try {
                 File f = new File(getCacheDir(), "conversion.png");
