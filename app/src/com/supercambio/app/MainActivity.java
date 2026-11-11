@@ -564,6 +564,13 @@ public class MainActivity extends Activity {
             histUsdt = new JSONArray();
             histPar = new JSONArray();
         }
+        // El historial antes guardaba un punto por cada apertura de la app (incluso sin cambio
+        // de tasa). Eso llenaba la serie de repetidos, inflaba el contador de puntos y dejaba la
+        // "Variación" de Gráficas siempre en 0,0 %. Se colapsa una sola vez al cargar.
+        histUsd = dedupeHist(histUsd);
+        histEur = dedupeHist(histEur);
+        histUsdt = dedupeHist(histUsdt);
+        histPar = dedupeHist(histPar);
     }
 
     private void saveAll() {
@@ -602,12 +609,49 @@ public class MainActivity extends Activity {
 
     private void appendHist(JSONArray arr, double v, long t) {
         try {
+            // Si la tasa no cambió no se guarda un punto nuevo: solo se actualiza la marca de
+            // tiempo del último, para que la serie siga siendo "puntos de cambio" y la gráfica
+            // llegue hasta la observación más reciente.
+            if (arr.length() > 0) {
+                JSONObject last = arr.getJSONObject(arr.length() - 1);
+                if (Math.abs(last.getDouble("v") - v) < 1e-9) {
+                    if (t > last.getLong("t")) last.put("t", t);
+                    return;
+                }
+            }
             JSONObject o = new JSONObject();
             o.put("t", t);
             o.put("v", v);
             arr.put(o);
             while (arr.length() > MAX_POINTS) arr.remove(0);
         } catch (Exception ignored) { }
+    }
+
+    // Colapsa rachas de valores iguales: conserva el primer timestamp de cada racha (el momento
+    // del cambio) y deja el último punto con la marca de tiempo más reciente de la serie.
+    private JSONArray dedupeHist(JSONArray src) {
+        JSONArray out = new JSONArray();
+        if (src == null) return out;
+        try {
+            long lastT = 0;
+            for (int i = 0; i < src.length(); i++) {
+                JSONObject o = src.getJSONObject(i);
+                long t = o.getLong("t");
+                if (t > lastT) lastT = t;
+                if (out.length() > 0) {
+                    JSONObject prev = out.getJSONObject(out.length() - 1);
+                    if (Math.abs(prev.getDouble("v") - o.getDouble("v")) < 1e-9) continue;
+                }
+                JSONObject np = new JSONObject();
+                np.put("t", t);
+                np.put("v", o.getDouble("v"));
+                out.put(np);
+            }
+            if (out.length() > 0 && lastT > 0) {
+                out.getJSONObject(out.length() - 1).put("t", lastT);
+            }
+        } catch (Exception ignored) { }
+        return out;
     }
 
     private void seedHistIfEmpty(JSONArray arr, double v, long t) {
@@ -2755,7 +2799,7 @@ public class MainActivity extends Activity {
             int n = arr != null ? arr.length() : 0;
             if (n < 2) {
                 statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
-                statCount.setText(n == 0 ? S("Aún no hay datos para esta tasa.", "No data for this rate yet.") : S("1 punto guardado · sigue abriendo la app para acumular datos.", "1 saved point · keep opening the app to collect data."));
+                statCount.setText(n == 0 ? S("Aún no hay datos para esta tasa.", "No data for this rate yet.") : S("1 tasa registrada · se guardará un punto cuando cambie.", "1 rate recorded · a point will be saved when it changes."));
                 chart.setData(null, null);
                 chart.invalidate();
                 return;
@@ -2765,13 +2809,25 @@ public class MainActivity extends Activity {
             if (rangeSel == 0) cut = System.currentTimeMillis() - 7L * 86400000L;
             else if (rangeSel == 1) cut = System.currentTimeMillis() - 30L * 86400000L;
             else if (rangeSel == 2) cut = System.currentTimeMillis() - 90L * 86400000L;
+            // La variación del rango necesita el valor de partida: si hay un punto justo antes
+            // del corte se incluye como línea base (el valor que estaba vigente al empezar
+            // el período). Sin él, un rango sin cambios propios mediría 0,0 %.
+            int start = 0;
+            if (cut > 0) {
+                try {
+                    for (int i = 0; i < n; i++) {
+                        if (arr.getJSONObject(i).getLong("t") < cut) start = i;
+                        else break;
+                    }
+                } catch (Exception ignored) { }
+            }
             java.util.ArrayList<Float> fv = new java.util.ArrayList<Float>();
             java.util.ArrayList<Long> ft = new java.util.ArrayList<Long>();
             try {
-                for (int i = 0; i < n; i++) {
+                for (int i = start; i < n; i++) {
                     JSONObject o = arr.getJSONObject(i);
                     long t = o.getLong("t");
-                    if (cut > 0 && t < cut) continue;
+                    if (i > start && cut > 0 && t < cut) continue;
                     fv.add((float) o.getDouble("v"));
                     ft.add(t);
                 }
@@ -2782,8 +2838,19 @@ public class MainActivity extends Activity {
             }
             int m = fv.size();
             if (m < 2) {
-                statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
-                statCount.setText(S("Sin datos en este rango todavía.", "No data in this range yet."));
+                if (m == 1) {
+                    // Solo la línea base: en este rango la tasa no llegó a cambiar.
+                    float only = fv.get(0);
+                    statMin.setText(fmt(only));
+                    statMax.setText(fmt(only));
+                    statAvg.setText(fmt(only));
+                    statVar.setText("▲ " + String.format(new Locale("es", "VE"), "%.1f %%", 0.0));
+                    statVar.setTextColor(col("text_secondary"));
+                    statCount.setText(S("Sin cambios de tasa en este rango.", "No rate changes in this range."));
+                } else {
+                    statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
+                    statCount.setText(S("Sin datos en este rango todavía.", "No data in this range yet."));
+                }
                 chart.setData(null, null);
                 chart.invalidate();
                 return;
@@ -2802,15 +2869,19 @@ public class MainActivity extends Activity {
                 sum += vals[i];
             }
             double avg = sum / m;
-            double var = (vals[m - 2] != 0) ? (vals[m - 1] - vals[m - 2]) / vals[m - 2] * 100.0 : 0;
+            // Variación del RANGO seleccionado: (último - primero) / primero.
+            // Antes comparaba los dos últimos puntos crudos, que casi siempre tenían el mismo
+            // valor (el historial guardaba un punto por cada apertura) y siempre daba 0,0 %.
+            double var = (vals[0] != 0) ? (vals[m - 1] - vals[0]) / vals[0] * 100.0 : 0;
 
             statMin.setText(fmt(min));
             statMax.setText(fmt(max));
             statAvg.setText(fmt(avg));
+            boolean flat = Math.abs(var) < 0.0001;
             statVar.setText((var >= 0 ? "▲ " : "▼ ") + String.format(new Locale("es", "VE"), "%.1f %%", Math.abs(var)));
-            statVar.setTextColor(var >= 0 ? col("green") : col("red"));
+            statVar.setTextColor(flat ? col("text_secondary") : (var >= 0 ? col("green") : col("red")));
             String[] rLbl = new String[]{ S("últimos 7 días", "last 7 days"), S("último mes", "last month"), S("últimos 3 meses", "last 3 months"), S("todo el historial", "all time") };
-            statCount.setText(m + S(" puntos · ", " points · ") + rLbl[rangeSel] + S(" · los datos se registran en cada apertura.", " · data is recorded on every open."));
+            statCount.setText(m + S(" cambios de tasa · ", " rate changes · ") + rLbl[rangeSel] + S(" · se guarda un punto cada vez que la tasa cambia.", " · a point is saved every time the rate changes."));
             chart.setData(vals, times);
             chart.startReveal();
         }
@@ -3072,7 +3143,7 @@ public class MainActivity extends Activity {
             if (vals == null || vals.length < 2) {
                 txt.setTextAlign(Paint.Align.CENTER);
                 canvas.drawText(S("Recolectando datos…", "Collecting data…"), w / 2f, h / 2f - dp(8), txt);
-                canvas.drawText(S("Cada apertura guarda un punto de la tasa.", "Each open saves one data point."), w / 2f, h / 2f + dp(10), txt);
+                canvas.drawText(S("Se guarda un punto cada vez que la tasa cambia.", "A point is saved every time the rate changes."), w / 2f, h / 2f + dp(10), txt);
                 txt.setTextAlign(Paint.Align.LEFT);
                 return;
             }
@@ -3119,7 +3190,12 @@ public class MainActivity extends Activity {
 
             Path fp = new Path();
             fp.moveTo(xs[0], ys[0]);
-            for (int i = 1; i < m; i++) fp.lineTo(xs[i], ys[i]);
+            // Step: la tasa se mantiene plana y salta el día que se publica, en vez de
+            // dibujarse como una rampa entre dos puntos de cambio.
+            for (int i = 1; i < m; i++) {
+                fp.lineTo(xs[i], ys[i - 1]);
+                fp.lineTo(xs[i], ys[i]);
+            }
 
             Path drawPath = fp;
             float endXLine = xs[m - 1], endYLine = ys[m - 1];
