@@ -110,7 +110,6 @@ public class MainActivity extends Activity {
 
     private int themeMode = 0; // 0=sistema 1=claro 2=oscuro
     private boolean blurOn = false;
-    private boolean glassFxOn = false;
     private boolean darkLogo = false;
     private boolean hapticsOn = true;
     private int accentIdx = 0;
@@ -148,8 +147,6 @@ public class MainActivity extends Activity {
     private ImageView glassSheen;
     private ImageView liquidSweep;
     private ImageView glassBorder;
-    private FrameLayout glassBtn;
-    private ImageView glassBtnIcon;
     private LinearLayout quickDock;
 
     private PageRates pageRates;
@@ -187,8 +184,11 @@ public class MainActivity extends Activity {
 
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         themeMode = p.getInt("theme_mode", 0);
-        blurOn = p.getBoolean("blur_on", false);
-        glassFxOn = p.getBoolean("glass_fx", false);
+        boolean legacyGlass = p.getBoolean("glass_fx", false);
+        blurOn = p.getBoolean("blur_on", false) || legacyGlass;
+        if (legacyGlass) {
+            p.edit().putBoolean("blur_on", true).remove("glass_fx").apply();
+        }
         darkLogo = p.getBoolean("dark_logo", false);
         hapticsOn = p.getBoolean("haptics_on", true);
         dailyNotif = p.getBoolean("daily_notif", false);
@@ -388,35 +388,20 @@ public class MainActivity extends Activity {
         return new LayerDrawable(new Drawable[]{base, sheen});
     }
 
-    private Drawable glassButtonBg(boolean active) {
-        int acc = col("accent");
-        int r = Color.red(acc), g = Color.green(acc), b = Color.blue(acc);
-        int a1 = active ? 130 : (isDark() ? 60 : 90);
-        int a2 = active ? 70 : (isDark() ? 30 : 40);
-        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{
-                Color.argb(a1, 255, 255, 255),
-                Color.argb(a2, r, g, b),
-                Color.argb(active ? 110 : 70, 255, 255, 255)
-        });
-        d.setCornerRadius(dp(999));
-        d.setStroke(1, active ? Color.argb(200, r, g, b) : (isDark() ? 0x42FFFFFF : 0x8AFFFFFF));
-        return d;
-    }
-
     private Drawable surfaceBg(float radiusDp) {
-        return glassFxOn ? glassBg(radiusDp, false) : rounded(col("card_bg"), radiusDp);
+        return blurOn ? glassBg(radiusDp, false) : rounded(col("card_bg"), radiusDp);
     }
 
     private Drawable inputSurface(float radiusDp) {
-        return glassFxOn ? glassBg(radiusDp, true) : rounded(col("input_bg"), radiusDp);
+        return blurOn ? glassBg(radiusDp, true) : rounded(col("input_bg"), radiusDp);
     }
 
     private Drawable selectedSurface(float radiusDp) {
-        return glassFxOn ? glassBg(radiusDp, true) : rounded(col("card_bg"), radiusDp);
+        return blurOn ? glassBg(radiusDp, true) : rounded(col("card_bg"), radiusDp);
     }
 
     private Drawable glassRipple(float radiusDp) {
-        if (!glassFxOn) return ripple(col("card_bg"), radiusDp);
+        if (!blurOn) return ripple(col("card_bg"), radiusDp);
         int rc = isDark() ? 0x26FFFFFF : 0x1F000000;
         try {
             return new android.graphics.drawable.RippleDrawable(
@@ -429,7 +414,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean blurActive() {
-        return blurOn || glassFxOn;
+        return blurOn;
     }
 
     // tvIos: igual que tv — letras SIEMPRE en Inter y los emojis con Apple Emoji
@@ -587,7 +572,6 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor e = p.edit();
         e.putInt("theme_mode", themeMode);
         e.putBoolean("blur_on", blurOn);
-        e.putBoolean("glass_fx", glassFxOn);
         e.putBoolean("dark_logo", darkLogo);
         e.putBoolean("haptics_on", hapticsOn);
         e.putBoolean("daily_notif", dailyNotif);
@@ -782,15 +766,14 @@ public class MainActivity extends Activity {
 
         FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(62));
-        blp.setMargins(dp(16), 0, dp(72), dp(14));
+        blp.setMargins(dp(16), 0, dp(16), dp(14));
         blp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         rootF.addView(floatingBar, blp);
 
-        buildGlassToggle(rootF);
         buildQuickDock(rootF);
         applyBarBackground();
 
-        if (glassFxOn) {
+        if (blurOn) {
             quickDock.post(new Runnable() {
                 public void run() { animateQuickDockIn(); }
             });
@@ -800,42 +783,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void buildGlassToggle(FrameLayout rootF) {
-        glassBtn = new FrameLayout(this);
-        glassBtn.setClickable(true);
-        glassBtn.setFocusable(true);
-        glassBtn.setElevation(dp(6));
-
-        glassBtnIcon = new ImageView(this);
-        glassBtnIcon.setImageResource(R.drawable.ic_glass);
-        glassBtnIcon.setPadding(dp(11), dp(11), dp(11), dp(11));
-        glassBtn.addView(glassBtnIcon, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        styleGlassToggle();
-
-        glassBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                haptic(v);
-                glassFxOn = !glassFxOn;
-                saveAll();
-                rebuildUiAnimated();
-                Toast.makeText(MainActivity.this,
-                        glassFxOn ? S("Vidrio líquido activado", "Liquid glass on") : S("Vidrio líquido desactivado", "Liquid glass off"),
-                        Toast.LENGTH_SHORT).show();
-            }
-        });
-        pressScale(glassBtn);
-
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(46), dp(46));
-        lp.gravity = Gravity.BOTTOM | Gravity.END;
-        lp.setMargins(0, 0, dp(16), dp(22));
-        rootF.addView(glassBtn, lp);
-    }
-
     private void buildQuickDock(FrameLayout rootF) {
         quickDock = new LinearLayout(this);
         quickDock.setOrientation(LinearLayout.HORIZONTAL);
         quickDock.setGravity(Gravity.CENTER_VERTICAL);
-        quickDock.setVisibility(glassFxOn ? View.VISIBLE : View.GONE);
+        quickDock.setVisibility(blurOn ? View.VISIBLE : View.GONE);
 
         addQuick(glassIconBtn(R.drawable.ic_refresh, S("Actualizar tasas", "Refresh rates"), new View.OnClickListener() {
             public void onClick(View v) { refresh(); }
@@ -884,19 +836,8 @@ public class MainActivity extends Activity {
         return wrap;
     }
 
-    private void styleGlassToggle() {
-        if (glassBtn == null) return;
-        glassBtn.setBackground(glassButtonBg(glassFxOn));
-        if (glassBtnIcon != null) {
-            glassBtnIcon.setColorFilter(glassFxOn ? col("accent") : col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
-        }
-        glassBtn.setContentDescription(glassFxOn
-                ? S("Desactivar vidrio líquido", "Turn off liquid glass")
-                : S("Activar vidrio líquido", "Turn on liquid glass"));
-    }
-
     private void animateQuickDockIn() {
-        if (quickDock == null || !glassFxOn) return;
+        if (quickDock == null || !blurOn) return;
         quickDock.setVisibility(View.VISIBLE);
         for (int i = 0; i < quickDock.getChildCount(); i++) {
             final View child = quickDock.getChildAt(i);
@@ -914,7 +855,7 @@ public class MainActivity extends Activity {
     }
 
     private void playGlassSweep() {
-        if (liquidSweep == null || !glassFxOn || floatingBar == null) return;
+        if (liquidSweep == null || !blurOn || floatingBar == null) return;
         int w = floatingBar.getWidth();
         if (w <= 0) return;
         liquidSweep.animate().cancel();
@@ -930,7 +871,7 @@ public class MainActivity extends Activity {
 
     private void applyBarBackground() {
         if (blurActive()) {
-            int alpha = glassFxOn ? 214 : 200;
+            int alpha = 210;
             int glass = isDark() ? Color.argb(alpha, 28, 28, 30) : Color.argb(alpha, 255, 255, 255);
             floatingBar.setBackground(rounded(glass, 31));
             floatingBar.setClipToOutline(true);
@@ -953,12 +894,7 @@ public class MainActivity extends Activity {
             glassBorder.setImageDrawable(border);
             glassBorder.setVisibility(View.VISIBLE);
 
-            if (glassFxOn) {
-                liquidSweep.setVisibility(View.VISIBLE);
-            } else {
-                liquidSweep.setAlpha(0f);
-                liquidSweep.setVisibility(View.GONE);
-            }
+            liquidSweep.setVisibility(View.VISIBLE);
         } else {
             floatingBar.setBackground(rounded(col("card_bg"), 31));
             floatingBar.setClipToOutline(true);
@@ -969,7 +905,6 @@ public class MainActivity extends Activity {
             if (liquidSweep != null) { liquidSweep.setAlpha(0f); liquidSweep.setVisibility(View.GONE); }
             if (lastBlurBitmap != null) { lastBlurBitmap.recycle(); lastBlurBitmap = null; }
         }
-        styleGlassToggle();
     }
 
     // ================= MOTOR DE DESENFOQUE (estático por eventos) =================
@@ -1043,7 +978,6 @@ public class MainActivity extends Activity {
             lastBlurBitmap = cur;
         } catch (Throwable t) {
             blurOn = false;
-            glassFxOn = false;
             applyBarBackground();
         }
     }
@@ -2234,7 +2168,7 @@ public class MainActivity extends Activity {
         pg.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(decel).start();
         if (i == 1 && pageCharts != null) pageCharts.redraw();
         blurAfterLayout();
-        if (glassFxOn) {
+        if (blurOn) {
             floatingBar.post(new Runnable() {
                 public void run() { playGlassSweep(); }
             });
@@ -3465,7 +3399,7 @@ public class MainActivity extends Activity {
             swapIv.setImageResource(R.drawable.ic_swap);
             swapIv.setColorFilter(acc, android.graphics.PorterDuff.Mode.SRC_IN);
             swapIv.setPadding(dp(11), dp(11), dp(11), dp(11));
-            swapIv.setBackground(glassFxOn ? glassBg(999, true)
+            swapIv.setBackground(blurOn ? glassBg(999, true)
                     : rounded(Color.argb(36, Color.red(acc), Color.green(acc), Color.blue(acc)), 999));
             FrameLayout.LayoutParams fsw = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER);
             swapWrap.addView(pressScale(swapIv), fsw);
@@ -3901,8 +3835,8 @@ public class MainActivity extends Activity {
         LinearLayout blurCol = new LinearLayout(this);
         blurCol.setOrientation(LinearLayout.VERTICAL);
         blurRow.addView(blurCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        blurCol.addView(tv(S("Desenfoque en la barra", "Bar blur"), 15, false, col("text_primary")));
-        blurCol.addView(tv(S("Vidrio esmerilado bajo los íconos", "Frosted glass under the icons"), 13, false, col("text_secondary")));
+        blurCol.addView(tv(S("Vidrio líquido", "Liquid glass"), 15, false, col("text_primary")));
+        blurCol.addView(tv(S("Desenfoque, reflejos y objetos de vidrio", "Blur, reflections and glass objects"), 13, false, col("text_secondary")));
 
         Switch blurSwitch = new Switch(this);
         blurSwitch.setChecked(blurOn);
@@ -3916,9 +3850,8 @@ public class MainActivity extends Activity {
             public void onCheckedChanged(CompoundButton b, boolean checked) {
                 blurOn = checked;
                 saveAll();
-                applyBarBackground();
-                blurAfterLayout();
-                Toast.makeText(MainActivity.this, checked ? S("Desenfoque activado", "Blur on") : S("Desenfoque desactivado", "Blur off"), Toast.LENGTH_SHORT).show();
+                rebuildUiAnimated();
+                Toast.makeText(MainActivity.this, checked ? S("Vidrio líquido activado", "Liquid glass on") : S("Vidrio líquido desactivado", "Liquid glass off"), Toast.LENGTH_SHORT).show();
             }
         });
         blurRow.addView(blurSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));

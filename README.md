@@ -8,8 +8,8 @@
 
 Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 
-[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.7-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
-[![Versión](https://img.shields.io/badge/versión-3.0.7-success?style=flat-square)](../../releases)
+[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.8-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
+[![Versión](https://img.shields.io/badge/versión-3.0.8-success?style=flat-square)](../../releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#)
 [![Sin anuncios](https://img.shields.io/badge/100%25-sin_anuncios-orange?style=flat-square)](#)
 
@@ -31,8 +31,8 @@ Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 | ⬇️ **Actualizaciones propias** | La app avisa al abrir si hay versión nueva, descarga con barra y cancelación, y pide permiso para instalarse sin tienda alguna |
 | 🌗 **Temas y acento** | Claro, oscuro o automático con transición de pantalla completa + 5 colores de acento |
 | 🌐 **Español e Inglés** | Cambiable desde la app |
-| 🧊 **Vidrio líquido** | Botón junto a la barra que activa desenfoque real, reflejos animados y superficies de vidrio en tarjetas, campos e iconos |
-| ⚡ **Acciones de vidrio** | Dock flotante con actualizar, compartir, conversor y nuevo perfil cuando el modo líquido está activo |
+| 🧊 **Vidrio líquido** | Un solo interruptor en *Acerca de* activa desenfoque real, reflejos animados y superficies de vidrio en tarjetas, campos e iconos |
+| ⚡ **Acciones de vidrio** | Dock flotante con actualizar, compartir, conversor y nuevo perfil cuando el vidrio líquido está activo |
 | 📌 **Aviso diario** | Notificación a las 3:35 PM con la tasa del día (activable) |
 | 🤝 **Historial compartido** | Las gráficas se enriquecen entre usuarios — solo cifras, nunca datos personales |
 | 🔤 **Tipografía e iconos** | Inter (equivalente libre de SF Pro) + iconos vectoriales estilo iOS en toda la interfaz |
