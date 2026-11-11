@@ -147,7 +147,6 @@ public class MainActivity extends Activity {
     private ImageView glassSheen;
     private ImageView liquidSweep;
     private ImageView glassBorder;
-    private LinearLayout quickDock;
 
     private PageRates pageRates;
     private PageCharts pageCharts;
@@ -770,87 +769,12 @@ public class MainActivity extends Activity {
         blp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         rootF.addView(floatingBar, blp);
 
-        buildQuickDock(rootF);
         applyBarBackground();
 
         if (blurOn) {
-            quickDock.post(new Runnable() {
-                public void run() { animateQuickDockIn(); }
-            });
             floatingBar.post(new Runnable() {
                 public void run() { playGlassSweep(); }
             });
-        }
-    }
-
-    private void buildQuickDock(FrameLayout rootF) {
-        quickDock = new LinearLayout(this);
-        quickDock.setOrientation(LinearLayout.HORIZONTAL);
-        quickDock.setGravity(Gravity.CENTER_VERTICAL);
-        quickDock.setVisibility(blurOn ? View.VISIBLE : View.GONE);
-
-        addQuick(glassIconBtn(R.drawable.ic_refresh, S("Actualizar tasas", "Refresh rates"), new View.OnClickListener() {
-            public void onClick(View v) { refresh(); }
-        }));
-        addQuick(glassIconBtn(R.drawable.ic_share, S("Compartir tasas", "Share rates"), new View.OnClickListener() {
-            public void onClick(View v) { shareRates(); }
-        }));
-        addQuick(glassIconBtn(R.drawable.ic_swap, S("Abrir conversor", "Open converter"), new View.OnClickListener() {
-            public void onClick(View v) { selectTab(2); }
-        }));
-        addQuick(glassIconBtn(R.drawable.ic_plus, S("Agregar perfil", "Add profile"), new View.OnClickListener() {
-            public void onClick(View v) {
-                selectTab(3);
-                ui.postDelayed(new Runnable() {
-                    public void run() { showTypeChooser(); }
-                }, 180);
-            }
-        }));
-
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.gravity = Gravity.BOTTOM | Gravity.END;
-        lp.setMargins(0, 0, dp(16), dp(86));
-        rootF.addView(quickDock, lp);
-    }
-
-    private void addQuick(View v) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(42), dp(42));
-        if (quickDock.getChildCount() > 0) lp.setMargins(dp(8), 0, 0, 0);
-        quickDock.addView(v, lp);
-    }
-
-    private View glassIconBtn(int iconRes, String desc, View.OnClickListener click) {
-        FrameLayout wrap = new FrameLayout(this);
-        wrap.setBackground(glassBg(999, true));
-        wrap.setElevation(dp(4));
-        ImageView iv = new ImageView(this);
-        iv.setImageResource(iconRes);
-        iv.setColorFilter(col("accent"), android.graphics.PorterDuff.Mode.SRC_IN);
-        iv.setPadding(dp(10), dp(10), dp(10), dp(10));
-        wrap.addView(iv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        wrap.setClickable(true);
-        wrap.setFocusable(true);
-        wrap.setContentDescription(desc);
-        wrap.setOnClickListener(click);
-        pressScale(wrap);
-        return wrap;
-    }
-
-    private void animateQuickDockIn() {
-        if (quickDock == null || !blurOn) return;
-        quickDock.setVisibility(View.VISIBLE);
-        for (int i = 0; i < quickDock.getChildCount(); i++) {
-            final View child = quickDock.getChildAt(i);
-            child.setAlpha(0f);
-            child.setTranslationY(dp(16));
-            child.setScaleX(0.82f);
-            child.setScaleY(0.82f);
-            ui.postDelayed(new Runnable() {
-                public void run() {
-                    child.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
-                            .setDuration(340).setInterpolator(pop).start();
-                }
-            }, i * 45);
         }
     }
 
