@@ -14,6 +14,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
@@ -899,6 +900,77 @@ public class MainActivity extends Activity {
         return e;
     }
 
+    private EditText bankField(LinearLayout parent, String label, String val) {
+        final EditText e = etField(parent, label, "");
+        String code = S7BQr.codeFor(val);
+        if (code != null) {
+            e.setTag(code);
+            e.setText(code + " · " + S7BQr.bankName(code));
+        } else {
+            e.setText(val == null ? "" : val);
+        }
+        e.setFocusable(false);
+        e.setFocusableInTouchMode(false);
+        e.setClickable(true);
+        e.setLongClickable(false);
+        e.setCursorVisible(false);
+        e.setInputType(InputType.TYPE_NULL);
+        e.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showBankChooser(e); }
+        });
+        return e;
+    }
+
+    private void showBankChooser(final EditText target) {
+        final Dialog d = new Dialog(this);
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(rounded(col("card_bg"), 22));
+        int p = dp(20);
+        card.setPadding(p, p, p, dp(12));
+        card.addView(tv(S("Elegir banco", "Choose bank"), 18, true, col("text_primary")));
+        card.addView(tv(S("Código SUPEN del banco receptor", "Receiver bank SUPEN code"), 12, false, col("text_secondary")));
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < S7BQr.BANKS.length; i++) {
+            final String code = S7BQr.BANKS[i][0];
+            final String name = S7BQr.BANKS[i][1];
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackground(ripple(col("input_bg"), 12));
+            row.setPadding(dp(12), dp(10), dp(12), dp(10));
+            TextView codeTv = tv(code, 12, true, col("accent"));
+            row.addView(codeTv, new LinearLayout.LayoutParams(dp(48), ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.addView(tv(name, 14, false, col("text_primary")), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            row.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    target.setTag(code);
+                    target.setText(code + " · " + name);
+                    d.dismiss();
+                }
+            });
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rlp.setMargins(0, dp(6), 0, 0);
+            list.addView(row, rlp);
+        }
+        sv.addView(list);
+        card.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(360)));
+        d.setContentView(card, new ViewGroup.LayoutParams(dp(320), ViewGroup.LayoutParams.WRAP_CONTENT));
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.dimAmount = 0.45f;
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
+        d.setCanceledOnTouchOutside(true);
+        d.show();
+    }
+
     private void sheetActions(final LinearLayout c, final int t, final int profIdx) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -926,7 +998,22 @@ public class MainActivity extends Activity {
                 }
                 try {
                     JSONObject nv = new JSONObject();
-                    for (int i = 0; i < fields.length; i++) nv.put(fields[i], ins[i].getText().toString().trim());
+                    for (int i = 0; i < fields.length; i++) {
+                        String val = ins[i].getText().toString().trim();
+                        Object tag = ins[i].getTag();
+                        if (tag instanceof String && ((String) tag).length() > 0) {
+                            val = (String) tag;
+                        }
+                        if (t == 0 && fields[i].equals("Banco")) {
+                            String code = S7BQr.codeFor(val);
+                            if (code == null) {
+                                Toast.makeText(MainActivity.this, S("Elige un banco válido", "Choose a valid bank"), Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            val = code;
+                        }
+                        nv.put(fields[i], val);
+                    }
                     JSONObject prof = new JSONObject();
                     prof.put("t", PAY_TYPES[t][0]);
                     prof.put("v", nv);
@@ -957,7 +1044,12 @@ public class MainActivity extends Activity {
         final LinearLayout c = sheet((profIdx >= 0 ? S("Editar · ", "Edit · ") : S("Nuevo · ", "New · ")) + ptName(t));
         for (int i = 0; i < fields.length; i++) {
             final int fi = i;
-            final EditText fe = etField(c, ptField(t, i), v.optString(fields[i], ""));
+            final EditText fe;
+            if (t == 0 && fields[i].equals("Banco")) {
+                fe = bankField(c, ptField(t, i), v.optString(fields[i], ""));
+            } else {
+                fe = etField(c, ptField(t, i), v.optString(fields[i], ""));
+            }
             TextView cp = tv(S("⧉ Copiar", "⧉ Copy"), 12, true, col("accent"));
             cp.setPadding(dp(2), 0, 0, dp(10));
             cp.setOnClickListener(new View.OnClickListener() {
@@ -1253,6 +1345,9 @@ public class MainActivity extends Activity {
             for (int i = 0; i < fields.length; i++) {
                 String val = v.optString(fields[i], "");
                 if (val.length() > 0 && val.toLowerCase().contains(q)) return true;
+                if (t == 0 && fields[i].equals("Banco") && val.length() > 0) {
+                    if (S7BQr.bankName(val).toLowerCase().contains(q)) return true;
+                }
             }
             return false;
         }
@@ -1278,7 +1373,9 @@ public class MainActivity extends Activity {
             col.setOrientation(LinearLayout.VERTICAL);
             col.addView(tv(ptName(t), 15, true, col("text_primary")));
             final String[] fieldsF = fields;
-            String sub = v.optString(fields[fields.length - 1], "") + " · " + v.optString(fields[0], "");
+            String firstVal = v.optString(fields[0], "");
+            if (t == 0) firstVal = S7BQr.bankName(firstVal);
+            String sub = v.optString(fields[fields.length - 1], "") + " · " + firstVal;
             final TextView st = tv(sub, 13, false, col("text_secondary"));
             st.setSingleLine(true);
             st.setEllipsize(TextUtils.TruncateAt.END);
@@ -1295,12 +1392,13 @@ public class MainActivity extends Activity {
             clp.setMargins(dp(12), 0, dp(8), 0);
             card.addView(col, clp);
 
-            // Botón QR: comparte el perfil como código QR escaneable
-            View qb = iconBtn(R.drawable.ic_qr, S("Compartir QR", "Share QR"), new View.OnClickListener() {
-                public void onClick(View vv) { shareQr(idx); }
-            });
-            card.addView(qb, new LinearLayout.LayoutParams(dp(44), dp(44)));
-            ((LinearLayout.LayoutParams) qb.getLayoutParams()).setMargins(0, 0, dp(2), 0);
+            if (t == 0) {
+                View qb = iconBtn(R.drawable.ic_qr, S("Ver QR", "View QR"), new View.OnClickListener() {
+                    public void onClick(View vv) { showQr(idx); }
+                });
+                card.addView(qb, new LinearLayout.LayoutParams(dp(44), dp(44)));
+                ((LinearLayout.LayoutParams) qb.getLayoutParams()).setMargins(0, 0, dp(2), 0);
+            }
 
             // Botón compartir: genera imagen con logo y nombre de la app
             View sh = iconBtn(R.drawable.ic_share, S("Compartir perfil", "Share profile"), new View.OnClickListener() {
@@ -1519,59 +1617,154 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ================= COMPARTIR PERFIL COMO QR (zxing, 100% local) =================
+    // ================= VER/COMPARTIR QR DE PAGO MÓVIL (S7B) =================
 
-    private void shareQr(int idx) {
+    private void showQr(int idx) {
         JSONArray arr = loadProfiles();
         if (idx < 0 || idx >= arr.length()) return;
         JSONObject o = arr.optJSONObject(idx);
         if (o == null) return;
         int t = typeIndexOf(o.optString("t", "pmov"));
-        String[] fields = PAY_TYPES[t][4].split("\u0001");
+        if (t != 0) return;
         JSONObject v = o.optJSONObject("v");
         if (v == null) v = new JSONObject();
 
-        // Texto legible que vivirá dentro del QR
-        StringBuilder txt = new StringBuilder(ptName(t)).append("\n");
-        for (int i = 0; i < fields.length; i++) {
-            String val = v.optString(fields[i], "").trim();
-            if (!val.isEmpty()) txt.append(ptField(t, i)).append(": ").append(val).append("\n");
+        String bankVal = v.optString("Banco", "");
+        String phoneVal = v.optString("Teléfono", "");
+        String idVal = v.optString("Cédula", "");
+        String nameVal = v.optString("Titular", "");
+        String payload;
+        try {
+            payload = S7BQr.encode(bankVal, phoneVal, idVal, nameVal);
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            if (msg == null || msg.length() == 0) msg = S("Completa banco, teléfono y cédula", "Complete bank, phone and ID");
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            showEdit(t, idx);
+            return;
         }
-        txt.append("\n").append(S("Enviado con Super Cambio", "Sent with Super Cambio"));
 
+        final Bitmap qr = makeQr(payload);
+        if (qr == null) {
+            Toast.makeText(this, S("No se pudo generar el QR", "Couldn't generate the QR"), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String phone = S7BQr.normalizePhone(phoneVal);
+        String id = S7BQr.normalizeId(idVal);
+        String bankName = S7BQr.bankName(bankVal);
+        StringBuilder txt = new StringBuilder(S("Pago móvil", "Mobile payment"));
+        txt.append("\n").append(bankName);
+        if (phone != null) txt.append("\n").append(phone);
+        if (id != null) txt.append("\n").append(id);
+        if (nameVal != null && nameVal.trim().length() > 0) txt.append("\n").append(nameVal.trim());
+        txt.append("\n\n").append(S("Enviado con Super Cambio", "Sent with Super Cambio"));
+
+        final File f = new File(getCacheDir(), "perfil_qr.png");
+        try {
+            FileOutputStream fo = new FileOutputStream(f);
+            qr.compress(Bitmap.CompressFormat.PNG, 100, fo);
+            fo.close();
+        } catch (Exception e) {
+            qr.recycle();
+            Toast.makeText(this, S("No se pudo guardar el QR", "Couldn't save the QR"), Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final String shareText = txt.toString();
+        LinearLayout c = sheet(S("QR de Pago móvil", "Mobile payment QR"));
+        c.addView(tv(S("Muéstrale este código al pagador para que lo escanee.", "Show this code to the payer so they can scan it."), 12, false, col("text_secondary")));
+        ImageView iv = new ImageView(this);
+        iv.setImageBitmap(qr);
+        iv.setAdjustViewBounds(true);
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        iv.setBackgroundColor(Color.WHITE);
+        iv.setPadding(dp(6), dp(6), dp(6), dp(6));
+        LinearLayout.LayoutParams ivlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300));
+        ivlp.setMargins(0, dp(10), 0, dp(8));
+        c.addView(iv, ivlp);
+        TextView info = tv(bankName + " · " + (phone == null ? phoneVal : phone), 12, false, col("text_secondary"));
+        info.setGravity(Gravity.CENTER);
+        c.addView(info);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.END);
+        TextView close = tv(S("Cerrar", "Close"), 14, true, col("text_secondary"));
+        close.setPadding(dp(16), dp(14), dp(16), dp(4));
+        close.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View vv) { closeSheet(); }
+        });
+        row.addView(close);
+        TextView share = tv(S("Compartir", "Share"), 14, true, col("accent"));
+        share.setPadding(dp(16), dp(14), 0, dp(4));
+        share.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View vv) {
+                closeSheet();
+                shareQrFile(f, shareText);
+            }
+        });
+        row.addView(share);
+        c.addView(row);
+        if (curSheet != null) {
+            curSheet.setOnDismissListener(new DialogInterface.OnDismissListener() {
+                public void onDismiss(DialogInterface d) { qr.recycle(); }
+            });
+        }
+    }
+
+    private Bitmap makeQr(String payload) {
         try {
             com.google.zxing.qrcode.QRCodeWriter w = new com.google.zxing.qrcode.QRCodeWriter();
             java.util.Map<com.google.zxing.EncodeHintType, Object> hints =
                     new java.util.HashMap<com.google.zxing.EncodeHintType, Object>();
             hints.put(com.google.zxing.EncodeHintType.CHARACTER_SET, "UTF-8");
+            hints.put(com.google.zxing.EncodeHintType.ERROR_CORRECTION, com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.H);
+            hints.put(com.google.zxing.EncodeHintType.MARGIN, 4);
+            int size = 1000;
             com.google.zxing.common.BitMatrix mx =
-                    w.encode(txt.toString(), com.google.zxing.BarcodeFormat.QR_CODE, 900, 900, hints);
-
-            int size = 900;
+                    w.encode(payload, com.google.zxing.BarcodeFormat.QR_CODE, size, size, hints);
             int[] px = new int[size * size];
             for (int y = 0; y < size; y++) {
                 for (int x = 0; x < size; x++) {
-                    px[y * size + x] = mx.get(x, y) ? 0xFF111114 : 0xFFFFFFFF;
+                    px[y * size + x] = mx.get(x, y) ? 0xFF000000 : 0xFFFFFFFF;
                 }
             }
             Bitmap qr = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
             qr.setPixels(px, 0, size, 0, 0, size, size);
+            try {
+                Bitmap logo = BitmapFactory.decodeResource(getResources(), R.drawable.suiche7b);
+                if (logo != null) {
+                    Canvas cv = new Canvas(qr);
+                    float cx = size / 2f;
+                    float cy = size / 2f;
+                    float box = size * 0.29f;
+                    float logoSize = size * 0.22f;
+                    Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    bg.setColor(Color.WHITE);
+                    cv.drawRoundRect(new RectF(cx - box / 2f, cy - box / 2f, cx + box / 2f, cy + box / 2f), box * 0.12f, box * 0.12f, bg);
+                    Paint lp = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    lp.setFilterBitmap(true);
+                    cv.drawBitmap(logo, null, new RectF(cx - logoSize / 2f, cy - logoSize / 2f, cx + logoSize / 2f, cy + logoSize / 2f), lp);
+                    logo.recycle();
+                }
+            } catch (Throwable ignored) { }
+            return qr;
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
-            File f = new File(getCacheDir(), "perfil_qr.png");
-            FileOutputStream fo = new FileOutputStream(f);
-            qr.compress(Bitmap.CompressFormat.PNG, 100, fo);
-            fo.close();
-            qr.recycle();
-
-            Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/perfil_qr.png");
+    private void shareQrFile(File f, String txt) {
+        try {
+            Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/" + f.getName());
             Intent it = new Intent(Intent.ACTION_SEND);
             it.setType("image/png");
             it.putExtra(Intent.EXTRA_STREAM, uri);
-            it.putExtra(Intent.EXTRA_TEXT, txt.toString());
+            it.putExtra(Intent.EXTRA_TEXT, txt);
             it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(Intent.createChooser(it, S("Compartir QR", "Share QR")));
         } catch (Exception e) {
-            Toast.makeText(this, S("No se pudo generar el QR", "Couldn't generate the QR"), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, S("No se pudo compartir el QR", "Couldn't share the QR"), Toast.LENGTH_SHORT).show();
         }
     }
 
