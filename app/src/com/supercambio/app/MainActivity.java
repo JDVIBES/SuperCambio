@@ -28,6 +28,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -109,6 +110,7 @@ public class MainActivity extends Activity {
 
     private int themeMode = 0; // 0=sistema 1=claro 2=oscuro
     private boolean blurOn = false;
+    private boolean glassFxOn = false;
     private boolean darkLogo = false;
     private boolean hapticsOn = true;
     private int accentIdx = 0;
@@ -144,7 +146,11 @@ public class MainActivity extends Activity {
     private FrameLayout floatingBar;
     private ImageView blurBg;
     private ImageView glassSheen;
+    private ImageView liquidSweep;
     private ImageView glassBorder;
+    private FrameLayout glassBtn;
+    private ImageView glassBtnIcon;
+    private LinearLayout quickDock;
 
     private PageRates pageRates;
     private PageCharts pageCharts;
@@ -162,7 +168,7 @@ public class MainActivity extends Activity {
     private boolean tickerOn = false;
     private final Runnable blurTick = new Runnable() {
         public void run() {
-            if (!blurOn) { tickerOn = false; return; }
+            if (!blurActive()) { tickerOn = false; return; }
             if (blurDirty) {
                 blurDirty = false;
                 doBlur();
@@ -182,6 +188,7 @@ public class MainActivity extends Activity {
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         themeMode = p.getInt("theme_mode", 0);
         blurOn = p.getBoolean("blur_on", false);
+        glassFxOn = p.getBoolean("glass_fx", false);
         darkLogo = p.getBoolean("dark_logo", false);
         hapticsOn = p.getBoolean("haptics_on", true);
         dailyNotif = p.getBoolean("daily_notif", false);
@@ -342,7 +349,7 @@ public class MainActivity extends Activity {
         ImageView iv = new ImageView(this);
         iv.setImageResource(iconRes);
         iv.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
-        iv.setBackground(rounded(col("input_bg"), 20));
+        iv.setBackground(inputSurface(20));
         iv.setPadding(dp(9), dp(9), dp(9), dp(9));
         FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER);
         wrap.addView(iv, ilp);
@@ -365,6 +372,64 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             return rounded(contentColor, radiusDp);
         }
+    }
+
+    // Superficie de vidrio líquido: gradiente translúcido + brillo superior + hairline
+    private Drawable glassBg(float radiusDp, boolean strong) {
+        int alpha = strong ? (isDark() ? 198 : 210) : (isDark() ? 150 : 166);
+        int top = isDark() ? Color.argb(alpha, 36, 36, 40) : Color.argb(alpha, 255, 255, 255);
+        int bottom = isDark() ? Color.argb(alpha, 24, 24, 27) : Color.argb(alpha, 244, 246, 252);
+        GradientDrawable base = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{top, bottom});
+        base.setCornerRadius(dp(radiusDp));
+        base.setStroke(1, isDark() ? 0x38FFFFFF : 0x80FFFFFF);
+        GradientDrawable sheen = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{isDark() ? 0x22FFFFFF : 0x4DFFFFFF, 0x00FFFFFF});
+        sheen.setCornerRadius(dp(radiusDp));
+        return new LayerDrawable(new Drawable[]{base, sheen});
+    }
+
+    private Drawable glassButtonBg(boolean active) {
+        int acc = col("accent");
+        int r = Color.red(acc), g = Color.green(acc), b = Color.blue(acc);
+        int a1 = active ? 130 : (isDark() ? 60 : 90);
+        int a2 = active ? 70 : (isDark() ? 30 : 40);
+        GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{
+                Color.argb(a1, 255, 255, 255),
+                Color.argb(a2, r, g, b),
+                Color.argb(active ? 110 : 70, 255, 255, 255)
+        });
+        d.setCornerRadius(dp(999));
+        d.setStroke(1, active ? Color.argb(200, r, g, b) : (isDark() ? 0x42FFFFFF : 0x8AFFFFFF));
+        return d;
+    }
+
+    private Drawable surfaceBg(float radiusDp) {
+        return glassFxOn ? glassBg(radiusDp, false) : rounded(col("card_bg"), radiusDp);
+    }
+
+    private Drawable inputSurface(float radiusDp) {
+        return glassFxOn ? glassBg(radiusDp, true) : rounded(col("input_bg"), radiusDp);
+    }
+
+    private Drawable selectedSurface(float radiusDp) {
+        return glassFxOn ? glassBg(radiusDp, true) : rounded(col("card_bg"), radiusDp);
+    }
+
+    private Drawable glassRipple(float radiusDp) {
+        if (!glassFxOn) return ripple(col("card_bg"), radiusDp);
+        int rc = isDark() ? 0x26FFFFFF : 0x1F000000;
+        try {
+            return new android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(rc),
+                    glassBg(radiusDp, false),
+                    rounded(0xFFFFFFFF, radiusDp));
+        } catch (Exception e) {
+            return glassBg(radiusDp, false);
+        }
+    }
+
+    private boolean blurActive() {
+        return blurOn || glassFxOn;
     }
 
     // tvIos: igual que tv — letras SIEMPRE en Inter y los emojis con Apple Emoji
@@ -522,6 +587,7 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor e = p.edit();
         e.putInt("theme_mode", themeMode);
         e.putBoolean("blur_on", blurOn);
+        e.putBoolean("glass_fx", glassFxOn);
         e.putBoolean("dark_logo", darkLogo);
         e.putBoolean("haptics_on", hapticsOn);
         e.putBoolean("daily_notif", dailyNotif);
@@ -659,6 +725,17 @@ public class MainActivity extends Activity {
         glassSheen.setScaleType(ImageView.ScaleType.FIT_XY);
         floatingBar.addView(glassSheen, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // Reflejo líquido que recorre el vidrio al activar o cambiar de pestaña
+        liquidSweep = new ImageView(this);
+        liquidSweep.setScaleType(ImageView.ScaleType.FIT_XY);
+        liquidSweep.setAlpha(0f);
+        liquidSweep.setVisibility(View.GONE);
+        GradientDrawable sweep = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0x00FFFFFF, isDark() ? 0x26FFFFFF : 0x5CFFFFFF, 0x00FFFFFF});
+        sweep.setCornerRadius(dp(31));
+        liquidSweep.setImageDrawable(sweep);
+        floatingBar.addView(liquidSweep, new FrameLayout.LayoutParams(dp(110), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_VERTICAL | Gravity.START));
+
         // Borde hairline de vidrio
         glassBorder = new ImageView(this);
         glassBorder.setScaleType(ImageView.ScaleType.FIT_XY);
@@ -705,16 +782,156 @@ public class MainActivity extends Activity {
 
         FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(62));
-        blp.setMargins(dp(16), 0, dp(16), dp(14));
+        blp.setMargins(dp(16), 0, dp(72), dp(14));
         blp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         rootF.addView(floatingBar, blp);
 
+        buildGlassToggle(rootF);
+        buildQuickDock(rootF);
         applyBarBackground();
+
+        if (glassFxOn) {
+            quickDock.post(new Runnable() {
+                public void run() { animateQuickDockIn(); }
+            });
+            floatingBar.post(new Runnable() {
+                public void run() { playGlassSweep(); }
+            });
+        }
+    }
+
+    private void buildGlassToggle(FrameLayout rootF) {
+        glassBtn = new FrameLayout(this);
+        glassBtn.setClickable(true);
+        glassBtn.setFocusable(true);
+        glassBtn.setElevation(dp(6));
+
+        glassBtnIcon = new ImageView(this);
+        glassBtnIcon.setImageResource(R.drawable.ic_glass);
+        glassBtnIcon.setPadding(dp(11), dp(11), dp(11), dp(11));
+        glassBtn.addView(glassBtnIcon, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        styleGlassToggle();
+
+        glassBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                haptic(v);
+                glassFxOn = !glassFxOn;
+                saveAll();
+                rebuildUiAnimated();
+                Toast.makeText(MainActivity.this,
+                        glassFxOn ? S("Vidrio líquido activado", "Liquid glass on") : S("Vidrio líquido desactivado", "Liquid glass off"),
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+        pressScale(glassBtn);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(46), dp(46));
+        lp.gravity = Gravity.BOTTOM | Gravity.END;
+        lp.setMargins(0, 0, dp(16), dp(22));
+        rootF.addView(glassBtn, lp);
+    }
+
+    private void buildQuickDock(FrameLayout rootF) {
+        quickDock = new LinearLayout(this);
+        quickDock.setOrientation(LinearLayout.HORIZONTAL);
+        quickDock.setGravity(Gravity.CENTER_VERTICAL);
+        quickDock.setVisibility(glassFxOn ? View.VISIBLE : View.GONE);
+
+        addQuick(glassIconBtn(R.drawable.ic_refresh, S("Actualizar tasas", "Refresh rates"), new View.OnClickListener() {
+            public void onClick(View v) { refresh(); }
+        }));
+        addQuick(glassIconBtn(R.drawable.ic_share, S("Compartir tasas", "Share rates"), new View.OnClickListener() {
+            public void onClick(View v) { shareRates(); }
+        }));
+        addQuick(glassIconBtn(R.drawable.ic_swap, S("Abrir conversor", "Open converter"), new View.OnClickListener() {
+            public void onClick(View v) { selectTab(2); }
+        }));
+        addQuick(glassIconBtn(R.drawable.ic_plus, S("Agregar perfil", "Add profile"), new View.OnClickListener() {
+            public void onClick(View v) {
+                selectTab(3);
+                ui.postDelayed(new Runnable() {
+                    public void run() { showTypeChooser(); }
+                }, 180);
+            }
+        }));
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.BOTTOM | Gravity.END;
+        lp.setMargins(0, 0, dp(16), dp(86));
+        rootF.addView(quickDock, lp);
+    }
+
+    private void addQuick(View v) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        if (quickDock.getChildCount() > 0) lp.setMargins(dp(8), 0, 0, 0);
+        quickDock.addView(v, lp);
+    }
+
+    private View glassIconBtn(int iconRes, String desc, View.OnClickListener click) {
+        FrameLayout wrap = new FrameLayout(this);
+        wrap.setBackground(glassBg(999, true));
+        wrap.setElevation(dp(4));
+        ImageView iv = new ImageView(this);
+        iv.setImageResource(iconRes);
+        iv.setColorFilter(col("accent"), android.graphics.PorterDuff.Mode.SRC_IN);
+        iv.setPadding(dp(10), dp(10), dp(10), dp(10));
+        wrap.addView(iv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        wrap.setClickable(true);
+        wrap.setFocusable(true);
+        wrap.setContentDescription(desc);
+        wrap.setOnClickListener(click);
+        pressScale(wrap);
+        return wrap;
+    }
+
+    private void styleGlassToggle() {
+        if (glassBtn == null) return;
+        glassBtn.setBackground(glassButtonBg(glassFxOn));
+        if (glassBtnIcon != null) {
+            glassBtnIcon.setColorFilter(glassFxOn ? col("accent") : col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
+        }
+        glassBtn.setContentDescription(glassFxOn
+                ? S("Desactivar vidrio líquido", "Turn off liquid glass")
+                : S("Activar vidrio líquido", "Turn on liquid glass"));
+    }
+
+    private void animateQuickDockIn() {
+        if (quickDock == null || !glassFxOn) return;
+        quickDock.setVisibility(View.VISIBLE);
+        for (int i = 0; i < quickDock.getChildCount(); i++) {
+            final View child = quickDock.getChildAt(i);
+            child.setAlpha(0f);
+            child.setTranslationY(dp(16));
+            child.setScaleX(0.82f);
+            child.setScaleY(0.82f);
+            ui.postDelayed(new Runnable() {
+                public void run() {
+                    child.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
+                            .setDuration(340).setInterpolator(pop).start();
+                }
+            }, i * 45);
+        }
+    }
+
+    private void playGlassSweep() {
+        if (liquidSweep == null || !glassFxOn || floatingBar == null) return;
+        int w = floatingBar.getWidth();
+        if (w <= 0) return;
+        liquidSweep.animate().cancel();
+        liquidSweep.setTranslationX(-dp(120));
+        liquidSweep.setAlpha(0f);
+        liquidSweep.setVisibility(View.VISIBLE);
+        liquidSweep.animate().alpha(0.9f).translationX(w + dp(12))
+                .setDuration(760).setInterpolator(decel)
+                .withEndAction(new Runnable() {
+                    public void run() { liquidSweep.setAlpha(0f); }
+                }).start();
     }
 
     private void applyBarBackground() {
-        if (blurOn) {
-            int glass = isDark() ? Color.argb(200, 28, 28, 30) : Color.argb(200, 255, 255, 255);
+        if (blurActive()) {
+            int alpha = glassFxOn ? 214 : 200;
+            int glass = isDark() ? Color.argb(alpha, 28, 28, 30) : Color.argb(alpha, 255, 255, 255);
             floatingBar.setBackground(rounded(glass, 31));
             floatingBar.setClipToOutline(true);
             blurBg.setVisibility(View.VISIBLE);
@@ -735,6 +952,13 @@ public class MainActivity extends Activity {
             border.setStroke(1, isDark() ? 0x2EFFFFFF : 0x59FFFFFF);
             glassBorder.setImageDrawable(border);
             glassBorder.setVisibility(View.VISIBLE);
+
+            if (glassFxOn) {
+                liquidSweep.setVisibility(View.VISIBLE);
+            } else {
+                liquidSweep.setAlpha(0f);
+                liquidSweep.setVisibility(View.GONE);
+            }
         } else {
             floatingBar.setBackground(rounded(col("card_bg"), 31));
             floatingBar.setClipToOutline(true);
@@ -742,8 +966,10 @@ public class MainActivity extends Activity {
             blurBg.setImageDrawable(null);
             glassSheen.setVisibility(View.GONE);
             glassBorder.setVisibility(View.GONE);
+            if (liquidSweep != null) { liquidSweep.setAlpha(0f); liquidSweep.setVisibility(View.GONE); }
             if (lastBlurBitmap != null) { lastBlurBitmap.recycle(); lastBlurBitmap = null; }
         }
+        styleGlassToggle();
     }
 
     // ================= MOTOR DE DESENFOQUE (estático por eventos) =================
@@ -753,7 +979,7 @@ public class MainActivity extends Activity {
     // durante el scroll = cero tirones.
 
     private void scheduleBlur() {
-        if (!blurOn || blurPending) return;
+        if (!blurActive() || blurPending) return;
         blurPending = true;
         pager.postDelayed(new Runnable() {
             public void run() { blurPending = false; doBlur(); }
@@ -763,7 +989,7 @@ public class MainActivity extends Activity {
     // Durante el scroll: marca pendiente y deja que el ticker capture a
     // ritmo fijo (~5 fps). Sin bitmap churn, sin capturas por frame.
     private void nudgeBlur() {
-        if (!blurOn) return;
+        if (!blurActive()) return;
         blurDirty = true;
         if (!tickerOn) {
             tickerOn = true;
@@ -772,7 +998,7 @@ public class MainActivity extends Activity {
     }
 
     private void doBlur() {
-        if (!blurOn || floatingBar == null || pager == null) return;
+        if (!blurActive() || floatingBar == null || pager == null) return;
         try {
             int pw = pager.getWidth(), ph = pager.getHeight();
             int bw = floatingBar.getWidth(), bh = floatingBar.getHeight();
@@ -817,6 +1043,7 @@ public class MainActivity extends Activity {
             lastBlurBitmap = cur;
         } catch (Throwable t) {
             blurOn = false;
+            glassFxOn = false;
             applyBarBackground();
         }
     }
@@ -902,7 +1129,7 @@ public class MainActivity extends Activity {
         curSheet = d;
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(rounded(col("card_bg"), 22));
+        card.setBackground(surfaceBg(22));
         int p = dp(20);
         card.setPadding(p, p, p, p);
         TextView t = tv(title, 18, true, col("text_primary"));
@@ -938,7 +1165,7 @@ public class MainActivity extends Activity {
         e.setTextColor(col("text_primary"));
         e.setHintTextColor(col("text_secondary"));
         e.setTextSize(14);
-        e.setBackground(rounded(col("input_bg"), 12));
+        e.setBackground(inputSurface(12));
         e.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(4), 0, dp(10));
@@ -972,7 +1199,7 @@ public class MainActivity extends Activity {
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(rounded(col("card_bg"), 22));
+        card.setBackground(surfaceBg(22));
         int p = dp(20);
         card.setPadding(p, p, p, dp(12));
         card.addView(tv(S("Elegir banco", "Choose bank"), 18, true, col("text_primary")));
@@ -985,7 +1212,7 @@ public class MainActivity extends Activity {
         search.setTextColor(col("text_primary"));
         search.setHintTextColor(col("text_secondary"));
         search.setHint(iconText(R.drawable.ic_search, S("Buscar banco o código…", "Search bank or code…"), 16, col("text_secondary")));
-        search.setBackground(rounded(col("input_bg"), 12));
+        search.setBackground(inputSurface(12));
         search.setPadding(dp(12), dp(9), dp(12), dp(9));
         search.setInputType(InputType.TYPE_CLASS_TEXT);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1180,7 +1407,7 @@ public class MainActivity extends Activity {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setBackground(rounded(col("input_bg"), 14));
+            row.setBackground(inputSurface(14));
             row.setPadding(dp(14), dp(12), dp(14), dp(12));
             TextView b = tv(PAY_TYPES[i][2], 13, true, Color.WHITE);
             b.setGravity(Gravity.CENTER);
@@ -1348,7 +1575,7 @@ public class MainActivity extends Activity {
             box.addView(bkRow, bkLp);
             TextView ex = tvIcon(R.drawable.ic_upload, S("Exportar", "Export"), 14, true, col("accent"), 17);
             ex.setGravity(Gravity.CENTER);
-            ex.setBackground(rounded(col("input_bg"), 12));
+            ex.setBackground(inputSurface(12));
             LinearLayout.LayoutParams exLp = new LinearLayout.LayoutParams(0, dp(42), 1);
             exLp.setMargins(0, 0, dp(6), 0);
             bkRow.addView(pressScale(ex), exLp);
@@ -1357,7 +1584,7 @@ public class MainActivity extends Activity {
             });
             TextView im = tvIcon(R.drawable.ic_download, S("Importar", "Import"), 14, true, col("accent"), 17);
             im.setGravity(Gravity.CENTER);
-            im.setBackground(rounded(col("input_bg"), 12));
+            im.setBackground(inputSurface(12));
             LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(0, dp(42), 1);
             imLp.setMargins(dp(6), 0, 0, 0);
             bkRow.addView(pressScale(im), imLp);
@@ -1373,7 +1600,7 @@ public class MainActivity extends Activity {
             search.setTextColor(col("text_primary"));
             search.setHintTextColor(col("text_secondary"));
             search.setHint(iconText(R.drawable.ic_search, S("Buscar perfiles…", "Search profiles…"), 16, col("text_secondary")));
-            search.setBackground(rounded(col("input_bg"), 14));
+            search.setBackground(inputSurface(14));
             search.setPadding(dp(14), dp(11), dp(14), dp(11));
             LinearLayout.LayoutParams seLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             seLp.setMargins(0, dp(12), 0, 0);
@@ -1447,7 +1674,7 @@ public class MainActivity extends Activity {
             LinearLayout card = new LinearLayout(MainActivity.this);
             card.setOrientation(LinearLayout.HORIZONTAL);
             card.setGravity(Gravity.CENTER_VERTICAL);
-            card.setBackground(ripple(col("card_bg"), 18));
+            card.setBackground(glassRipple(18));
             card.setPadding(dp(16), dp(14), dp(16), dp(14));
 
             TextView badge = tv(PAY_TYPES[t][2], 14, true, Color.WHITE);
@@ -2007,6 +2234,11 @@ public class MainActivity extends Activity {
         pg.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(decel).start();
         if (i == 1 && pageCharts != null) pageCharts.redraw();
         blurAfterLayout();
+        if (glassFxOn) {
+            floatingBar.post(new Runnable() {
+                public void run() { playGlassSweep(); }
+            });
+        }
     }
 
     private void updateAllPages() {
@@ -2030,7 +2262,7 @@ public class MainActivity extends Activity {
             cardTitle = title;
             card = new LinearLayout(MainActivity.this);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(rounded(col("card_bg"), 18));
+            card.setBackground(surfaceBg(18));
             card.setPadding(dp(18), dp(16), dp(18), dp(18));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMargins(0, dp(12), 0, 0);
@@ -2295,7 +2527,7 @@ public class MainActivity extends Activity {
 
             datePill = tv("—", 15, true, col("accent"));
             datePill.setGravity(Gravity.CENTER);
-            datePill.setBackground(rounded(col("input_bg"), 14));
+            datePill.setBackground(inputSurface(14));
             datePill.setPadding(dp(14), 0, dp(14), 0);
             datePill.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { fetchNextManual(); }
@@ -2305,7 +2537,7 @@ public class MainActivity extends Activity {
             dateAct = new ImageView(MainActivity.this);
             dateAct.setImageResource(R.drawable.ic_refresh);
             dateAct.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
-            dateAct.setBackground(rounded(col("input_bg"), 14));
+            dateAct.setBackground(inputSurface(14));
             dateAct.setElevation(0);
             dateAct.setPadding(dp(13), dp(13), dp(13), dp(13));
             dateAct.setOnClickListener(new View.OnClickListener() {
@@ -2543,7 +2775,7 @@ public class MainActivity extends Activity {
 
             segWrap = new LinearLayout(MainActivity.this);
             segWrap.setOrientation(LinearLayout.HORIZONTAL);
-            segWrap.setBackground(rounded(col("input_bg"), 10));
+            segWrap.setBackground(inputSurface(10));
             segWrap.setPadding(dp(3), dp(3), dp(3), dp(3));
             LinearLayout.LayoutParams segLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
             segLp.setMargins(0, dp(16), 0, 0);
@@ -2565,7 +2797,7 @@ public class MainActivity extends Activity {
             // Rango de tiempo
             rangeWrap = new LinearLayout(MainActivity.this);
             rangeWrap.setOrientation(LinearLayout.HORIZONTAL);
-            rangeWrap.setBackground(rounded(col("input_bg"), 10));
+            rangeWrap.setBackground(inputSurface(10));
             rangeWrap.setPadding(dp(3), dp(3), dp(3), dp(3));
             LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
             rLp.setMargins(0, dp(10), 0, 0);
@@ -2590,7 +2822,7 @@ public class MainActivity extends Activity {
 
             LinearLayout chartCard = new LinearLayout(MainActivity.this);
             chartCard.setOrientation(LinearLayout.VERTICAL);
-            chartCard.setBackground(rounded(col("card_bg"), 18));
+            chartCard.setBackground(surfaceBg(18));
             int cpad = dp(14);
             chartCard.setPadding(cpad, cpad, cpad, cpad);
             LinearLayout.LayoutParams cclp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2642,7 +2874,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < 4; i++) {
                 TextView sv = (TextView) segWrap.getChildAt(i);
                 if (i == sel) {
-                    sv.setBackground(rounded(col("card_bg"), 8));
+                    sv.setBackground(selectedSurface(8));
                     sv.setTextColor(col("text_primary"));
                 } else {
                     sv.setBackground(null);
@@ -2653,7 +2885,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < 4; i++) {
                 TextView sv = (TextView) rangeWrap.getChildAt(i);
                 if (i == rangeSel) {
-                    sv.setBackground(rounded(col("card_bg"), 8));
+                    sv.setBackground(selectedSurface(8));
                     sv.setTextColor(col("text_primary"));
                 } else {
                     sv.setBackground(null);
@@ -3163,7 +3395,7 @@ public class MainActivity extends Activity {
 
             LinearLayout card = new LinearLayout(MainActivity.this);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(rounded(col("card_bg"), 18));
+            card.setBackground(surfaceBg(18));
             card.setPadding(dp(18), dp(18), dp(18), dp(20));
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             clp.setMargins(0, dp(16), 0, 0);
@@ -3171,7 +3403,7 @@ public class MainActivity extends Activity {
 
             segWrap = new LinearLayout(MainActivity.this);
             segWrap.setOrientation(LinearLayout.HORIZONTAL);
-            segWrap.setBackground(rounded(col("input_bg"), 10));
+            segWrap.setBackground(inputSurface(10));
             segWrap.setPadding(dp(3), dp(3), dp(3), dp(3));
             card.addView(segWrap, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
             String[] segNames = {"USD", "EUR", "USDT"};
@@ -3207,7 +3439,7 @@ public class MainActivity extends Activity {
 
             input = new EditText(MainActivity.this);
             input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-            input.setBackground(rounded(col("input_bg"), 14));
+            input.setBackground(inputSurface(14));
             input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
             input.setTextColor(col("text_primary"));
             input.setTypeface(TF_MED);
@@ -3233,7 +3465,8 @@ public class MainActivity extends Activity {
             swapIv.setImageResource(R.drawable.ic_swap);
             swapIv.setColorFilter(acc, android.graphics.PorterDuff.Mode.SRC_IN);
             swapIv.setPadding(dp(11), dp(11), dp(11), dp(11));
-            swapIv.setBackground(rounded(Color.argb(36, Color.red(acc), Color.green(acc), Color.blue(acc)), 999));
+            swapIv.setBackground(glassFxOn ? glassBg(999, true)
+                    : rounded(Color.argb(36, Color.red(acc), Color.green(acc), Color.blue(acc)), 999));
             FrameLayout.LayoutParams fsw = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER);
             swapWrap.addView(pressScale(swapIv), fsw);
             swapIv.setOnClickListener(new View.OnClickListener() {
@@ -3255,7 +3488,7 @@ public class MainActivity extends Activity {
             colTo.addView(labelTo, ltLp);
 
             result = tv("—", 26, true, col("text_primary"));
-            result.setBackground(rounded(col("input_bg"), 14));
+            result.setBackground(inputSurface(14));
             result.setPadding(dp(16), dp(16), dp(16), dp(16));
             result.setClickable(true);
             result.setOnClickListener(new View.OnClickListener() {
@@ -3304,7 +3537,7 @@ public class MainActivity extends Activity {
 
             feeInput = new EditText(MainActivity.this);
             feeInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-            feeInput.setBackground(rounded(col("input_bg"), 14));
+            feeInput.setBackground(inputSurface(14));
             feeInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
             feeInput.setTextColor(col("text_primary"));
             feeInput.setTypeface(TF_MED);
@@ -3362,7 +3595,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < 3; i++) {
                 TextView sv = (TextView) segWrap.getChildAt(i);
                 if (i == mode) {
-                    sv.setBackground(rounded(col("card_bg"), 9));
+                    sv.setBackground(selectedSurface(9));
                     sv.setTextColor(col("text_primary"));
                 } else {
                     sv.setBackground(null);
@@ -3590,7 +3823,7 @@ public class MainActivity extends Activity {
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.VERTICAL);
         head.setGravity(Gravity.CENTER_HORIZONTAL);
-        head.setBackground(rounded(col("card_bg"), 18));
+        head.setBackground(surfaceBg(18));
         head.setPadding(dp(18), dp(26), dp(18), dp(24));
         box.addView(head, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -3939,7 +4172,7 @@ public class MainActivity extends Activity {
     private LinearLayout card(LinearLayout parent) {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
-        c.setBackground(rounded(col("card_bg"), 18));
+        c.setBackground(surfaceBg(18));
         c.setPadding(dp(18), dp(4), dp(18), dp(4));
         parent.addView(c, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return c;
