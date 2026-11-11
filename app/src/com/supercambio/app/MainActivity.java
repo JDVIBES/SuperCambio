@@ -2878,6 +2878,21 @@ public class MainActivity extends Activity {
             });
             chartHead.addView(resetBtn, new LinearLayout.LayoutParams(dp(32), dp(32)));
 
+            // Compartir la gráfica como imagen con la marca de la app
+            ImageView shareBtn = new ImageView(MainActivity.this);
+            shareBtn.setImageResource(R.drawable.ic_share);
+            shareBtn.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
+            shareBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
+            shareBtn.setBackground(inputSurface(999));
+            shareBtn.setContentDescription(S("Compartir la gráfica", "Share the chart"));
+            pressScale(shareBtn);
+            shareBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { haptic(v); shareChart(); }
+            });
+            LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(dp(32), dp(32));
+            shLp.setMargins(dp(6), 0, 0, 0);
+            chartHead.addView(shareBtn, shLp);
+
             chart = new ChartView();
             chartCard.addView(chart, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
 
@@ -3047,6 +3062,235 @@ public class MainActivity extends Activity {
             boolean changed = chart.dataChanged(vals, times);
             chart.setData(vals, times, chartT0, chartT1, rangeSel * 10 + sel);
             if (changed) chart.startReveal();
+        }
+
+        // Compartir la gráfica como imagen con la marca de la app: lo que se ve, lo que se
+        // comparte (si la ventana está muy cerrada se comparte la serie completa).
+        void shareChart() {
+            if (chart == null) return;
+            float[] vs = chart.vals;
+            long[] ts = chart.times;
+            if (vs == null || ts == null || vs.length < 2 || ts.length != vs.length) {
+                Toast.makeText(MainActivity.this, S("Aún no hay datos para compartir", "No data to share yet"), Toast.LENGTH_SHORT).show();
+                return;
+            }
+            long winStart = chart.startT;
+            long winEnd = chart.startT + chart.spanNow();
+            java.util.ArrayList<Float> fv = new java.util.ArrayList<Float>();
+            java.util.ArrayList<Long> ft = new java.util.ArrayList<Long>();
+            for (int i = 0; i < vs.length; i++) {
+                if (ts[i] < winStart || ts[i] > winEnd) continue;
+                fv.add(Float.valueOf(vs[i]));
+                ft.add(Long.valueOf(ts[i]));
+            }
+            if (fv.size() < 2) {
+                fv.clear();
+                ft.clear();
+                for (int i = 0; i < vs.length; i++) {
+                    fv.add(Float.valueOf(vs[i]));
+                    ft.add(Long.valueOf(ts[i]));
+                }
+            }
+            int n = fv.size();
+            if (n < 2) {
+                Toast.makeText(MainActivity.this, S("Aún no hay datos para compartir", "No data to share yet"), Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            boolean dk = isDark();
+            int bgCol = dk ? 0xFF0E0E10 : 0xFFF2F3F7;
+            int cardCol = dk ? 0xFF1C1C1E : Color.WHITE;
+            int priCol = dk ? 0xFFF2F2F7 : 0xFF111114;
+            int secCol = dk ? 0xFF98989F : 0xFF8E8E93;
+            int sepCol = dk ? 0x24FFFFFF : 0x14000000;
+
+            int W = 1000, H = 760, pad = 56, headH = 170, footH = 130;
+            float x0 = pad + 40, x1 = W - pad - 40;
+            float y0 = pad + headH + 44, y1 = H - pad - footH - 30;
+
+            float vmin = fv.get(0).floatValue(), vmax = vmin;
+            for (int i = 0; i < n; i++) {
+                float v = fv.get(i).floatValue();
+                if (v < vmin) vmin = v;
+                if (v > vmax) vmax = v;
+            }
+            float rng = vmax - vmin;
+            float mar = rng > 0f ? rng * 0.14f : Math.max(1e-6f, Math.abs(vmax) * 0.05f);
+            float ymin = vmin - mar, ymax = vmax + mar, yr = ymax - ymin;
+            if (yr <= 0f) yr = 1f;
+            long t0 = ft.get(0).longValue(), t1 = ft.get(n - 1).longValue();
+            long tr = (t1 > t0) ? (t1 - t0) : 1L;
+            double var = (fv.get(0).floatValue() != 0)
+                    ? (fv.get(n - 1).floatValue() - fv.get(0).floatValue()) / fv.get(0).floatValue() * 100.0 : 0;
+
+            Bitmap bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+            Canvas cv = new Canvas(bmp);
+            cv.drawColor(bgCol);
+
+            Paint cardP = new Paint(Paint.ANTI_ALIAS_FLAG);
+            cardP.setColor(cardCol);
+            siCardShadow(cardP);
+            cv.drawRoundRect(pad, pad, W - pad, H - pad, 44, 44, cardP);
+
+            // ---------- cabecera ----------
+            float cx = pad + 70, cy = pad + 78, r = 58;
+            siLogo(cv, cx, cy, r);
+            float tx = cx + 96;
+            String[] names = {S("Dólar oficial", "Official dollar"), S("Euro oficial", "Official euro"), "USDT Binance", S("Dólar paralelo", "Parallel dollar")};
+            String[] rLbl = {S("últimos 7 días", "last 7 days"), S("último mes", "last month"), S("últimos 3 meses", "last 3 months"), S("todo el historial", "all time")};
+            String valTxt = fmt(fv.get(n - 1).floatValue()) + BSU;
+            String varTxt = (var >= 0 ? "▲ +" : "▼ −")
+                    + String.format(new Locale("es", "VE"), "%.2f %%", Math.abs(var));
+            Paint titleP = siPaint(priCol, 46, true);
+            Paint typeP = siLight(secCol, 32);
+            Paint valP = siPaint(priCol, 50, true);
+            Paint varP = siPaint(Math.abs(var) < 0.0001 ? secCol : (var >= 0 ? col("green") : col("red")), 28, true);
+            // El título y el valor comparten línea, y el subtítulo y la variación también:
+            // se mide lo de la derecha para que lo de la izquierda NUNCA lo pise.
+            float valMax = (W - pad - 40) - tx - titleP.measureText("Super Cambio") - 40;
+            if (valMax > 80f) siFit(valP, valTxt, valMax);
+            float varW = varP.measureText(varTxt);
+            float subMax = (W - pad - 40) - varW - 40 - tx;
+            if (subMax > 80f) siFit(typeP, names[sel] + " · " + rLbl[rangeSel], subMax);
+            cv.drawText("Super Cambio", tx, siBase(titleP, pad + 52), titleP);
+            cv.drawText(names[sel] + " · " + rLbl[rangeSel], tx, siBase(typeP, pad + 104), typeP);
+
+            // Valor actual + variación (derecha de la cabecera)
+            valP.setTextAlign(Paint.Align.RIGHT);
+            cv.drawText(valTxt, W - pad - 40, siBase(valP, pad + 58), valP);
+            varP.setTextAlign(Paint.Align.RIGHT);
+            cv.drawText(varTxt, W - pad - 40, siBase(varP, pad + 108), varP);
+
+            Paint sepP = new Paint();
+            sepP.setColor(sepCol);
+            sepP.setStrokeWidth(3);
+            cv.drawLine(pad + 40, pad + headH, W - pad - 40, pad + headH, sepP);
+
+            // ---------- ejes ----------
+            Paint gridP = new Paint(Paint.ANTI_ALIAS_FLAG);
+            gridP.setColor(sepCol);
+            gridP.setStrokeWidth(2);
+            for (int g = 0; g <= 2; g++) {
+                float gy = y0 + (y1 - y0) * g / 2f;
+                cv.drawLine(x0, gy, x1, gy, gridP);
+            }
+
+            // ---------- área + línea ----------
+            float[] xs = new float[n], ys = new float[n];
+            for (int i = 0; i < n; i++) {
+                xs[i] = x0 + (x1 - x0) * (ft.get(i).longValue() - t0) / (float) tr;
+                float norm = (fv.get(i).floatValue() - ymin) / yr;
+                ys[i] = y1 - (y1 - y0) * norm;
+            }
+            boolean up = fv.get(n - 1).floatValue() >= fv.get(0).floatValue();
+            int trend = up ? col("green") : col("red");
+
+            Path area = new Path();
+            area.moveTo(xs[0], ys[0]);
+            for (int i = 1; i < n; i++) {
+                area.lineTo(xs[i], ys[i - 1]);
+                area.lineTo(xs[i], ys[i]);
+            }
+            area.lineTo(xs[n - 1], y1);
+            area.lineTo(xs[0], y1);
+            area.close();
+            Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+            fill.setShader(new LinearGradient(0, y0, 0, y1,
+                    Color.argb(70, Color.red(trend), Color.green(trend), Color.blue(trend)),
+                    Color.argb(0, Color.red(trend), Color.green(trend), Color.blue(trend)), Shader.TileMode.CLAMP));
+            cv.drawPath(area, fill);
+            fill.setShader(null);
+
+            Paint lineP = new Paint(Paint.ANTI_ALIAS_FLAG);
+            lineP.setStyle(Paint.Style.STROKE);
+            lineP.setStrokeWidth(7);
+            lineP.setStrokeCap(Paint.Cap.ROUND);
+            for (int i = 1; i < n; i++) {
+                int c;
+                if (ys[i] < ys[i - 1] - 0.01f) c = col("green");
+                else if (ys[i] > ys[i - 1] + 0.01f) c = col("red");
+                else c = trend;
+                lineP.setColor(c);
+                Path seg = new Path();
+                seg.moveTo(xs[i - 1], ys[i - 1]);
+                seg.lineTo(xs[i], ys[i - 1]);
+                seg.lineTo(xs[i], ys[i]);
+                cv.drawPath(seg, lineP);
+            }
+
+            // ---------- mínimo y máximo ----------
+            int iMin = 0, iMax = 0;
+            for (int i = 0; i < n; i++) {
+                if (fv.get(i).floatValue() < fv.get(iMin).floatValue()) iMin = i;
+                if (fv.get(i).floatValue() > fv.get(iMax).floatValue()) iMax = i;
+            }
+            Paint dotP = new Paint(Paint.ANTI_ALIAS_FLAG);
+            dotP.setColor(Color.WHITE);
+            cv.drawCircle(xs[iMax], ys[iMax], 12, dotP);
+            dotP.setColor(trend);
+            cv.drawCircle(xs[iMax], ys[iMax], 8, dotP);
+            Paint lbP = siLight(secCol, 28);
+            lbP.setTextAlign(Paint.Align.CENTER);
+            float mxP = Math.min(Math.max(xs[iMax], x0 + 70), x1 - 70);
+            cv.drawText(fmt(fv.get(iMax).floatValue()), mxP, ys[iMax] - 28, lbP);
+
+            dotP.setColor(Color.WHITE);
+            cv.drawCircle(xs[iMin], ys[iMin], 12, dotP);
+            dotP.setColor(trend);
+            cv.drawCircle(xs[iMin], ys[iMin], 8, dotP);
+            float myP = ys[iMin] + 46;
+            if (myP > y1 + 26) myP = ys[iMin] - 28;
+            float mnP = Math.min(Math.max(xs[iMin], x0 + 70), x1 - 70);
+            cv.drawText(fmt(fv.get(iMin).floatValue()), mnP, myP, lbP);
+
+            // ---------- punto final ----------
+            dotP.setColor(Color.WHITE);
+            cv.drawCircle(xs[n - 1], ys[n - 1], 15, dotP);
+            dotP.setColor(trend);
+            cv.drawCircle(xs[n - 1], ys[n - 1], 10, dotP);
+
+            // ---------- eje de fechas ----------
+            Paint axP = siLight(secCol, 26);
+            axP.setTextAlign(Paint.Align.CENTER);
+            for (int k = 0; k <= 2; k++) {
+                long tt = t0 + (long) (tr * k / 2);
+                String s = chart.fmtAxisDate(tt, tr);
+                float xx = x0 + (x1 - x0) * k / 2f;
+                if (k == 0) { axP.setTextAlign(Paint.Align.LEFT); xx = x0; }
+                else if (k == 2) { axP.setTextAlign(Paint.Align.RIGHT); xx = x1; }
+                else axP.setTextAlign(Paint.Align.CENTER);
+                cv.drawText(s, xx, y1 + 52, axP);
+            }
+
+            // ---------- pie ----------
+            Paint footP = siLight(secCol, 30);
+            footP.setTextAlign(Paint.Align.CENTER);
+            cv.drawText(S("Generado con Super Cambio · © 2026 Jdvibes", "Generated with Super Cambio · © 2026 Jdvibes"), W / 2f, H - pad - 40, footP);
+
+            try {
+                File f = new File(getCacheDir(), "grafica.png");
+                FileOutputStream fo = new FileOutputStream(f);
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, fo);
+                fo.close();
+                bmp.recycle();
+
+                StringBuilder txt = new StringBuilder(names[sel]).append("\n");
+                txt.append(S("Evolución de la tasa · ", "Rate evolution · ")).append(rLbl[rangeSel]).append("\n");
+                txt.append(S("Valor actual: ", "Current: ")).append(fmt(fv.get(n - 1).floatValue())).append(" Bs.\n");
+                txt.append(S("Variación: ", "Change: ")).append(var >= 0 ? "+" : "−")
+                        .append(String.format(new Locale("es", "VE"), "%.2f %%", Math.abs(var))).append("\n");
+                txt.append("\n").append(S("Enviado con Super Cambio", "Sent with Super Cambio"));
+
+                Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/grafica.png");
+                Intent it = new Intent(Intent.ACTION_SEND);
+                it.setType("image/png");
+                it.putExtra(Intent.EXTRA_STREAM, uri);
+                it.putExtra(Intent.EXTRA_TEXT, txt.toString());
+                it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(it, S("Compartir gráfica", "Share chart")));
+            } catch (Exception e) {
+                Toast.makeText(MainActivity.this, S("No se pudo generar la imagen", "Couldn't generate the image"), Toast.LENGTH_SHORT).show();
+            }
         }
     }
 
