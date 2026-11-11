@@ -2902,7 +2902,7 @@ public class MainActivity extends Activity {
             if (n < 2) {
                 statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
                 statCount.setText(n == 0 ? S("Aún no hay datos para esta tasa.", "No data for this rate yet.") : S("1 tasa registrada · se guardará un punto cuando cambie.", "1 rate recorded · a point will be saved when it changes."));
-                chart.setData(null, null, 0L, 1L);
+                chart.setData(null, null, 0L, 1L, -1);
                 chart.invalidate();
                 return;
             }
@@ -2934,7 +2934,7 @@ public class MainActivity extends Activity {
                     ft.add(t);
                 }
             } catch (Exception e) {
-                chart.setData(null, null, 0L, 1L);
+                chart.setData(null, null, 0L, 1L, -1);
                 chart.invalidate();
                 return;
             }
@@ -2953,7 +2953,7 @@ public class MainActivity extends Activity {
                     statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
                     statCount.setText(S("Sin datos en este rango todavía.", "No data in this range yet."));
                 }
-                chart.setData(null, null, 0L, 1L);
+                chart.setData(null, null, 0L, 1L, -1);
                 chart.invalidate();
                 return;
             }
@@ -2990,7 +2990,7 @@ public class MainActivity extends Activity {
             long chartT1 = System.currentTimeMillis();
             if (chartT1 <= chartT0) chartT1 = chartT0 + 3600000L;
             boolean changed = chart.dataChanged(vals, times);
-            chart.setData(vals, times, chartT0, chartT1);
+            chart.setData(vals, times, chartT0, chartT1, rangeSel * 10 + sel);
             if (changed) chart.startReveal();
         }
     }
@@ -3010,10 +3010,14 @@ public class MainActivity extends Activity {
         private long tMin, tMax;
         private long gPanT0;
         private long lastSig = Long.MIN_VALUE;
+        private int lastRangeKey = -1;
 
         private float sX0, sY0, gSpan = -1f, lastUpX, scrubX, cx0;
         private boolean scrub, scrubPass, gOver, pan2;
-        private int scrubIdx = -1;
+        // Instante del punto que se está mirando. Se guarda el TIEMPO y no el índice: al mover
+        // la ventana (zoom, pan, barra de navegación) el índice queda obsoleto y el acceso
+        // fuera del array provocaba ArrayIndexOutOfBoundsException (length=1; index=38).
+        private long scrubT = -1L;
         private long lastUpT = 0L;
         private ScaleGestureDetector scaleDet;
 
@@ -3165,7 +3169,7 @@ public class MainActivity extends Activity {
                         lastUpT = System.currentTimeMillis();
                         lastUpX = ev.getX();
                         // la burbuja PERSISTE: no se borra al soltar el dedo
-                        if (scrubIdx < 0 && times != null && times.length > 0) {
+                        if (scrubT < 0 && times != null && times.length > 0) {
                             scrubX = ev.getX();
                             updScrubIdx();
                         }
@@ -3241,7 +3245,7 @@ public class MainActivity extends Activity {
             zoom = 1f;
             startT = tMin;
             spanT = tMax - tMin;
-            scrubIdx = -1;
+            scrubT = -1L;
             scrub = false;
             windowChanged();
             invalidate();
@@ -3268,10 +3272,12 @@ public class MainActivity extends Activity {
         void setWindow(long s, long span) {
             long full = tMax - tMin;
             if (full <= 0) return;
+            if (span <= 0) span = minSpan();
             if (span < minSpan()) span = minSpan();
             if (span > full) span = full;
             zoom = (float) full / (float) span;
             if (zoom < 1f) zoom = 1f;
+            if (zoom > 1e6f) zoom = 1e6f;
             startT = s;
             clampStart();
             windowChanged();
@@ -3280,6 +3286,7 @@ public class MainActivity extends Activity {
 
         // índice del último punto con times[i] <= t (-1 si ninguno)
         private int idxAtOrBefore(long t) {
+            if (times == null || times.length == 0) return -1;
             int lo = 0, hi = times.length - 1, res = -1;
             while (lo <= hi) {
                 int mid = (lo + hi) >>> 1;
@@ -3291,6 +3298,7 @@ public class MainActivity extends Activity {
 
         // índice del primer punto con times[i] >= t (times.length si ninguno)
         private int idxAtOrAfter(long t) {
+            if (times == null || times.length == 0) return 0;
             int lo = 0, hi = times.length - 1, res = times.length;
             while (lo <= hi) {
                 int mid = (lo + hi) >>> 1;
@@ -3311,7 +3319,7 @@ public class MainActivity extends Activity {
         }
 
         private void updScrubIdx() {
-            if (times == null || times.length == 0) { scrubIdx = -1; return; }
+            if (times == null || times.length == 0) { scrubT = -1L; return; }
             float usableW = Math.max(1f, getWidth() - pl() - pr());
             long span = spanNow();
             long t = startT + (long) ((scrubX - pl()) / usableW * (float) span);
@@ -3319,7 +3327,7 @@ public class MainActivity extends Activity {
             int i = idxAtOrBefore(t);
             if (i < 0) i = 0;
             if (i > times.length - 1) i = times.length - 1;
-            scrubIdx = i;
+            scrubT = times[i];          // se ancla al instante, no al índice
         }
 
         // x de un instante (clampado a los bordes de la ventana)
@@ -3330,13 +3338,12 @@ public class MainActivity extends Activity {
             return padL + usableW * ((float) (t - winStart) / (float) span);
         }
 
-        void setData(float[] v, long[] t, long rangeStart, long rangeEnd) {
-            // El zoom se conserva mientras el rango y los datos sean los mismos (tMax es "ahora"
-            // y cambia en cada refresco, por eso no se compara).
-            boolean sameRange = (rangeStart == tMin
-                    && t != null && times != null && t.length == times.length
-                    && (t.length == 0 || t[t.length - 1] == times[times.length - 1]));
-            if (!sameRange) scrubIdx = -1;
+        void setData(float[] v, long[] t, long rangeStart, long rangeEnd, int rangeKey) {
+            // El zoom se conserva mientras el RANGO sea el mismo (rangeKey = rangeSel*10+sel).
+            // Antes se comparaba rangeStart == tMin, pero rangeStart = "ahora - 7 días" cambia
+            // en cada milisegundo → el zoom se reiniciaba en cada refresco de datos.
+            boolean sameRange = (rangeKey == lastRangeKey);
+            if (!sameRange) scrubT = -1L;
             vals = v;
             times = t;
             tMin = rangeStart;
@@ -3345,9 +3352,10 @@ public class MainActivity extends Activity {
             if (!sameRange) {
                 zoom = 1f;
                 startT = tMin;
-                scrubIdx = -1;
+                scrubT = -1L;
                 scrub = false;
             }
+            lastRangeKey = rangeKey;
             spanT = tMax - tMin;
             clampStart();
             windowChanged();
@@ -3384,6 +3392,15 @@ public class MainActivity extends Activity {
 
         @Override
         protected void onDraw(Canvas canvas) {
+            try {
+                drawChart(canvas);
+            } catch (Throwable t) {
+                // Red de seguridad: un fallo al dibujar NUNCA debe cerrar la app.
+                // El siguiente frame lo vuelve a intentar.
+            }
+        }
+
+        private void drawChart(Canvas canvas) {
             super.onDraw(canvas);
             int w = getWidth(), h = getHeight();
             if (w == 0 || h == 0) return;
@@ -3393,7 +3410,7 @@ public class MainActivity extends Activity {
             float usableH = h - padT - padB;
             float plotB = padT + usableH;
 
-            if (vals == null || vals.length < 2) {
+            if (vals == null || vals.length < 2 || times == null || times.length != vals.length) {
                 txt.setTextAlign(Paint.Align.CENTER);
                 canvas.drawText(S("Recolectando datos…", "Collecting data…"), w / 2f, h / 2f - dp(8), txt);
                 canvas.drawText(S("Se guarda un punto cada vez que la tasa cambia.", "A point is saved every time the rate changes."), w / 2f, h / 2f + dp(10), txt);
@@ -3412,6 +3429,15 @@ public class MainActivity extends Activity {
             if (iB > vals.length - 1) iB = vals.length - 1;
             if (iB < iA) iB = iA;
             int m = iB - iA + 1;
+
+            // ÚNICO índice validado para el marcador y la burbuja: el punto que se está
+            // mirando puede quedar fuera de la ventana al hacer zoom o pan, y entonces no se
+            // dibuja nada (antes el acceso a xs[scrubIdx-iA] reventaba la app).
+            int sIdx = -1;
+            if (scrubT >= 0) {
+                int k = idxAtOrBefore(scrubT);
+                if (k >= iA && k <= iB) sIdx = k;
+            }
 
             float vmin = vals[iA], vmax = vals[iA];
             for (int i = iA; i <= iB; i++) {
@@ -3510,8 +3536,8 @@ public class MainActivity extends Activity {
                 canvas.drawLine(padL, curY, w - padR, curY, ref);
             }
 
-            if (scrubIdx >= iA && scrubIdx <= iB && scrubIdx >= 0) {
-                float mx = xs[scrubIdx - iA], my = ys[scrubIdx - iA];
+            if (sIdx >= 0) {
+                float mx = xs[sIdx - iA], my = ys[sIdx - iA];
                 hs.setAlpha(70);
                 canvas.drawLine(mx, padT, mx, plotB, hs);
                 dot.setColor(Color.WHITE);
@@ -3577,14 +3603,14 @@ public class MainActivity extends Activity {
             canvas.drawText(sMin, xMin, plotB + dp(13), lblB);
 
             // ---------- burbuja flotante (persistente) ----------
-            if (scrubIdx >= 0 && scrubIdx < vals.length) {
-                float mx = xs[scrubIdx - iA], my = ys[scrubIdx - iA];
-                String b1 = fmt(vals[scrubIdx]);
-                String b2 = S("vigente desde ", "since ") + fdf.format(new Date(times[scrubIdx]));
-                if (scrubIdx > 0) {
-                    double dv = vals[scrubIdx - 1];
+            if (sIdx >= 0) {
+                float mx = xs[sIdx - iA], my = ys[sIdx - iA];
+                String b1 = fmt(vals[sIdx]);
+                String b2 = S("vigente desde ", "since ") + fdf.format(new Date(times[sIdx]));
+                if (sIdx > 0) {
+                    double dv = vals[sIdx - 1];
                     if (dv != 0) {
-                        double pc = (vals[scrubIdx] - dv) / dv * 100.0;
+                        double pc = (vals[sIdx] - dv) / dv * 100.0;
                         b2 = b2 + " · " + (pc >= 0 ? "+" : "−") + String.format(new Locale("es", "VE"), "%.2f %%", Math.abs(pc));
                     }
                 }
@@ -3684,6 +3710,14 @@ public class MainActivity extends Activity {
 
         @Override
         protected void onDraw(Canvas canvas) {
+            try {
+                drawOverview(canvas);
+            } catch (Throwable t) {
+                // Red de seguridad: un fallo al dibujar la miniatura no cierra la app.
+            }
+        }
+
+        private void drawOverview(Canvas canvas) {
             super.onDraw(canvas);
             int w = getWidth(), h = getHeight();
             if (w == 0 || h == 0) return;
