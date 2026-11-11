@@ -37,10 +37,12 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.SpannableString;
+import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.ImageSpan;
 import android.text.style.TypefaceSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -369,6 +371,28 @@ public class MainActivity extends Activity {
     // (span por rango, no cambiar el typeface del TextView entero)
     private TextView tvIos(String text, float sizeSp, boolean bold, int color) {
         return tv(text, sizeSp, bold, color);
+    }
+
+    private Drawable iconDrawable(int res, int sizeDp, int color) {
+        Drawable d = getResources().getDrawable(res, getTheme()).mutate();
+        d.setTint(color);
+        d.setBounds(0, 0, dp(sizeDp), dp(sizeDp));
+        return d;
+    }
+
+    private CharSequence iconText(int res, String text, int sizeDp, int color) {
+        SpannableStringBuilder sb = new SpannableStringBuilder(" ");
+        sb.setSpan(new ImageSpan(iconDrawable(res, sizeDp, color), ImageSpan.ALIGN_BASELINE),
+                0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.append(" ");
+        sb.append(brandSpan(text));
+        return sb;
+    }
+
+    private TextView tvIcon(int res, String text, float sizeSp, boolean bold, int color, int iconDp) {
+        TextView t = tv(text, sizeSp, bold, color);
+        t.setText(iconText(res, text, iconDp, color));
+        return t;
     }
 
     // Rango de codepoints que viven en AppleEmoji.ttf (y solo ahí, no en Inter)
@@ -938,7 +962,7 @@ public class MainActivity extends Activity {
         search.setTypeface(TF_REG);
         search.setTextColor(col("text_primary"));
         search.setHintTextColor(col("text_secondary"));
-        search.setHint(brandSpan(S("🔍  Buscar banco o código…", "🔍  Search bank or code…")));
+        search.setHint(iconText(R.drawable.ic_search, S("Buscar banco o código…", "Search bank or code…"), 16, col("text_secondary")));
         search.setBackground(rounded(col("input_bg"), 12));
         search.setPadding(dp(12), dp(9), dp(12), dp(9));
         search.setInputType(InputType.TYPE_CLASS_TEXT);
@@ -1003,7 +1027,7 @@ public class MainActivity extends Activity {
             list.addView(row, rlp);
         }
         if (shown == 0) {
-            TextView empty = tv(S("🔍 Sin resultados", "🔍 No results"), 14, false, col("text_secondary"));
+            TextView empty = tvIcon(R.drawable.ic_search, S("Sin resultados", "No results"), 14, false, col("text_secondary"), 16);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(24), 0, dp(24));
             list.addView(empty);
@@ -1215,7 +1239,7 @@ public class MainActivity extends Activity {
             os = getContentResolver().openOutputStream(uri);
             if (os == null) throw new Exception("stream");
             os.write(sb.toString().getBytes("UTF-8"));
-            Toast.makeText(this, S("✅ Historial exportado", "✅ History exported"), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, S("Historial exportado", "History exported"), Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Toast.makeText(this, S("No se pudo guardar el CSV", "Couldn't save the CSV"), Toast.LENGTH_SHORT).show();
         } finally {
@@ -1280,7 +1304,7 @@ public class MainActivity extends Activity {
             box.addView(tv(S("Tus perfiles de cobro, guardados solo en este teléfono.", "Your payment profiles, stored only on this phone."), 13, false, col("text_secondary")));
 
             Button addBtn = new Button(MainActivity.this);
-            addBtn.setText(S("＋ Agregar perfil", "＋ Add profile"));
+            addBtn.setText(iconText(R.drawable.ic_plus, S("Agregar perfil", "Add profile"), 16, Color.WHITE));
             addBtn.setTextColor(Color.WHITE);
             addBtn.setTextSize(15);
             addBtn.setTypeface(TF_MED);
@@ -1300,7 +1324,7 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             bkLp.setMargins(0, dp(4), 0, dp(4));
             box.addView(bkRow, bkLp);
-            TextView ex = tv(S("⇪  Exportar", "⇪  Export"), 14, true, col("accent"));
+            TextView ex = tvIcon(R.drawable.ic_upload, S("Exportar", "Export"), 14, true, col("accent"), 17);
             ex.setGravity(Gravity.CENTER);
             ex.setBackground(rounded(col("input_bg"), 12));
             LinearLayout.LayoutParams exLp = new LinearLayout.LayoutParams(0, dp(42), 1);
@@ -1309,7 +1333,7 @@ public class MainActivity extends Activity {
             ex.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { exportProfiles(); }
             });
-            TextView im = tv(S("⥥  Importar", "⥥  Import"), 14, true, col("accent"));
+            TextView im = tvIcon(R.drawable.ic_download, S("Importar", "Import"), 14, true, col("accent"), 17);
             im.setGravity(Gravity.CENTER);
             im.setBackground(rounded(col("input_bg"), 12));
             LinearLayout.LayoutParams imLp = new LinearLayout.LayoutParams(0, dp(42), 1);
@@ -1326,7 +1350,7 @@ public class MainActivity extends Activity {
             search.setTypeface(TF_REG);
             search.setTextColor(col("text_primary"));
             search.setHintTextColor(col("text_secondary"));
-            search.setHint(brandSpan(S("🔍  Buscar perfiles…", "🔍  Search profiles…")));
+            search.setHint(iconText(R.drawable.ic_search, S("Buscar perfiles…", "Search profiles…"), 16, col("text_secondary")));
             search.setBackground(rounded(col("input_bg"), 14));
             search.setPadding(dp(14), dp(11), dp(14), dp(11));
             LinearLayout.LayoutParams seLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1342,7 +1366,8 @@ public class MainActivity extends Activity {
             list.setOrientation(LinearLayout.VERTICAL);
             box.addView(list);
 
-            empty = tvIos(S("💳 Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "💳 No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 13, false, col("text_secondary"));
+            empty = tvIos("", 13, false, col("text_secondary"));
+            empty.setText(iconText(R.drawable.ic_card, S("Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 18, col("text_secondary")));
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(40), 0, 0);
             box.addView(empty);
@@ -1366,9 +1391,9 @@ public class MainActivity extends Activity {
                 shown++;
             }
             if (shown == 0 && q.length() > 0) {
-                empty.setText(brandSpan(S("🔍 Sin resultados para tu búsqueda.", "🔍 No results for your search.")));
+                empty.setText(iconText(R.drawable.ic_search, S("Sin resultados para tu búsqueda.", "No results for your search."), 18, col("text_secondary")));
             } else {
-                empty.setText(brandSpan(S("💳 Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "💳 No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy.")));
+                empty.setText(iconText(R.drawable.ic_card, S("Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 18, col("text_secondary")));
             }
             empty.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
             nudgeBlur();
@@ -1465,7 +1490,7 @@ public class MainActivity extends Activity {
         int t = typeIndexOf(o != null ? o.optString("t", "pmov") : "pmov");
         final LinearLayout c = sheet(S("Opciones · ", "Options · ") + ptName(t));
         if (idx > 0) {
-            TextView up = tv(S("▲  Mover arriba", "▲  Move up"), 15, true, col("accent"));
+            TextView up = tvIcon(R.drawable.ic_chevron_up, S("Mover arriba", "Move up"), 15, true, col("accent"), 18);
             up.setPadding(dp(4), dp(14), dp(4), dp(14));
             up.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { closeSheet(); moveProfile(idx, -1); }
@@ -1473,14 +1498,14 @@ public class MainActivity extends Activity {
             c.addView(up);
         }
         if (idx < arr.length() - 1) {
-            TextView down = tv(S("▼  Mover abajo", "▼  Move down"), 15, true, col("accent"));
+            TextView down = tvIcon(R.drawable.ic_chevron_down, S("Mover abajo", "Move down"), 15, true, col("accent"), 18);
             down.setPadding(dp(4), dp(14), dp(4), dp(14));
             down.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { closeSheet(); moveProfile(idx, 1); }
             });
             c.addView(down);
         }
-        TextView del = tv(S("🗑  Eliminar perfil", "🗑  Delete profile"), 15, true, col("red"));
+        TextView del = tvIcon(R.drawable.ic_trash, S("Eliminar perfil", "Delete profile"), 15, true, col("red"), 18);
         del.setPadding(dp(4), dp(14), dp(4), dp(4));
         del.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { closeSheet(); confirmDelete(idx); }
@@ -1500,7 +1525,7 @@ public class MainActivity extends Activity {
             a.put(idx, other);
             a.put(j, me);
             saveProfiles(a);
-            Toast.makeText(this, S("▲ Orden actualizado", "▲ Order updated"), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, S("Orden actualizado", "Order updated"), Toast.LENGTH_SHORT).show();
         } catch (Exception ignored) { }
     }
 
@@ -2111,7 +2136,8 @@ public class MainActivity extends Activity {
             srlp.setMargins(0, dp(10), 0, 0);
             box.addView(statusRow, srlp);
 
-            status = tvIos(S("⏳ Sin datos todavía", "⏳ No data yet"), 13, false, col("text_secondary"));
+            status = tvIos("", 13, false, col("text_secondary"));
+            status.setText(iconText(R.drawable.ic_hourglass, S("Sin datos todavía", "No data yet"), 14, col("text_secondary")));
             statusRow.addView(status, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
             statusSpin = new ProgressBar(MainActivity.this);
@@ -2231,8 +2257,8 @@ public class MainActivity extends Activity {
             nextCountdown.setGravity(Gravity.CENTER);
             nextBox.addView(nextCountdown, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            nextStatus = tvIos(S("⏱ Estimado según el horario habitual del BCV (3:30 PM, día hábil).", "⏱ Estimated from the BCV's usual schedule (3:30 PM, business day)."),
-                    12, false, col("text_secondary"));
+            nextStatus = tvIos("", 12, false, col("text_secondary"));
+            nextStatus.setText(iconText(R.drawable.ic_clock, S("Estimado según el horario habitual del BCV (3:30 PM, día hábil).", "Estimated from the BCV's usual schedule (3:30 PM, business day)."), 13, col("text_secondary")));
             nextStatus.setGravity(Gravity.CENTER);
             nextStatus.setPadding(0, dp(6), 0, 0);
             nextBox.addView(nextStatus, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -2328,7 +2354,7 @@ public class MainActivity extends Activity {
                 nextCountdown.setText("—");
                 nextCountdown.setTextColor(col("text_primary"));
                 datePill.setText("—");
-                nextStatus.setText(brandSpan(S("Actualiza para calcular la próxima publicación del BCV.", "Refresh to estimate the BCV's next publication.")));
+                nextStatus.setText(iconText(R.drawable.ic_clock, S("Actualiza para calcular la próxima publicación del BCV.", "Refresh to estimate the BCV's next publication."), 13, col("text_secondary")));
                 return;
             }
             long next = computeNextPublish(last);
@@ -2340,9 +2366,9 @@ public class MainActivity extends Activity {
             if (diff <= 0) {
                 nextCountdown.setTextColor(col("text_primary"));
                 nextCountdown.setText(S("¡Atento!", "Stay tuned!"));
-                datePill.setText(brandSpan(S("👁  Ver nueva tasa", "👁  View new rate")));
+                datePill.setText(iconText(R.drawable.ic_eye, S("Ver nueva tasa", "View new rate"), 16, col("green")));
                 datePill.setTextColor(col("green"));
-                nextStatus.setText(brandSpan(S("La nueva tasa puede estar vigente desde ahora. Toca para verla.", "The new rate may be live now. Tap to view it.")));
+                nextStatus.setText(iconText(R.drawable.ic_eye, S("La nueva tasa puede estar vigente desde ahora. Toca para verla.", "The new rate may be live now. Tap to view it."), 13, col("text_secondary")));
                 if (!autoBusy) autoFetchNextRate(false);
                 return;
             }
@@ -2351,7 +2377,7 @@ public class MainActivity extends Activity {
             dateAct.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
             nextCountdown.setTextColor(col("text_primary"));
             nextCountdown.setText(countdownText(diff));
-            nextStatus.setText(brandSpan(S("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).", "Time left until the next publication (est. 3:30 PM, business day).")));
+            nextStatus.setText(iconText(R.drawable.ic_clock, S("Tiempo restante para la próxima publicación (estimado 3:30 PM, día hábil).", "Time left until the next publication (est. 3:30 PM, business day)."), 13, col("text_secondary")));
         }
 
         private void autoFetchNextRate(boolean force) {
@@ -2399,27 +2425,27 @@ public class MainActivity extends Activity {
                                 updateAllPages();
                                 celebrateUntil = System.currentTimeMillis() + 10000;
                                 haptic(nextCountdown);
-                                pageRates.nextStatus.setText(brandSpan(S("🎉 ¡Nueva tasa publicada!", "🎉 New rate published!")));
+                                pageRates.nextStatus.setText(iconText(R.drawable.ic_sparkles, S("¡Nueva tasa publicada!", "New rate published!"), 13, col("green")));
                                 nextCountdown.setTextColor(col("green"));
                                 nextCountdown.setText(S("¡Nueva tasa publicada!", "New rate published!"));
                                 nextCountdown.setScaleX(1.15f);
                                 nextCountdown.setScaleY(1.15f);
                                 nextCountdown.animate().scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(pop).start();
                                 SimpleDateFormat f = new SimpleDateFormat("HH:mm", new Locale("es"));
-                                nextStatus.setText(S("El BCV publicó Bs. ", "BCV published Bs. ") + fmt(fRate) + S(" · detectado a las ", " · detected at ") + f.format(new Date()) + S(" (hora del teléfono)", " (phone time)"));
+                                nextStatus.setText(iconText(R.drawable.ic_check_circle, S("El BCV publicó Bs. ", "BCV published Bs. ") + fmt(fRate) + S(" · detectado a las ", " · detected at ") + f.format(new Date()) + S(" (hora del teléfono)", " (phone time)"), 13, col("green")));
                                 dateAct.setEnabled(true);
                                 dateAct.setAlpha(1f);
                             } else {
                                 dateAct.setEnabled(true);
                                 dateAct.setAlpha(1f);
                                 if (netErr != null) {
-                                    nextStatus.setText(S("Sin conexión con el BCV · revisando cada minuto…", "Can't reach the BCV · retrying every minute…"));
+                                    nextStatus.setText(iconText(R.drawable.ic_wifi_off, S("Sin conexión con el BCV · revisando cada minuto…", "Can't reach the BCV · retrying every minute…"), 13, col("text_secondary")));
                                 } else {
                                     int dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
                                     if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) {
-                                        nextStatus.setText(S("El BCV no publica fines de semana · próxima tasa: lunes a las 3:30 PM", "BCV doesn't publish on weekends · next rate: Monday at 3:30 PM"));
+                                        nextStatus.setText(iconText(R.drawable.ic_calendar, S("El BCV no publica fines de semana · próxima tasa: lunes a las 3:30 PM", "BCV doesn't publish on weekends · next rate: Monday at 3:30 PM"), 13, col("text_secondary")));
                                     } else {
-                                        nextStatus.setText(S("El BCV aún no publica la nueva tasa · revisando cada minuto…", "BCV hasn't published the new rate yet · checking every minute…"));
+                                        nextStatus.setText(iconText(R.drawable.ic_clock, S("El BCV aún no publica la nueva tasa · revisando cada minuto…", "BCV hasn't published the new rate yet · checking every minute…"), 13, col("text_secondary")));
                                     }
                                 }
                             }
@@ -3587,9 +3613,12 @@ public class MainActivity extends Activity {
             cdg.setColor(cc[isDark() ? 1 : 0]);
             circle.setBackground(cdg);
             if (accentIdx == i) {
-                TextView chk = tv("✓", 14, true, Color.WHITE);
-                chk.setGravity(Gravity.CENTER);
-                circle.addView(chk, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                ImageView chk = new ImageView(this);
+                chk.setImageResource(R.drawable.ic_check);
+                chk.setColorFilter(Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN);
+                FrameLayout.LayoutParams chkLp = new FrameLayout.LayoutParams(dp(18), dp(18));
+                chkLp.gravity = Gravity.CENTER;
+                circle.addView(chk, chkLp);
             }
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(38), dp(38));
             clp.setMargins(0, 0, dp(12), 0);
@@ -3769,7 +3798,7 @@ public class MainActivity extends Activity {
         box.addView(sectionLabel(S("Actualizaciones", "Updates")));
         LinearLayout updCard = card(box);
         LinearLayout updRow = rowBase(updCard,
-                updTag.length() > 0 ? S("⬇️ Nueva versión disponible: ", "⬇️ New version available: ") + updTag : S("Buscar actualizaciones", "Check for updates"),
+                updTag.length() > 0 ? S("Nueva versión disponible: ", "New version available: ") + updTag : S("Buscar actualizaciones", "Check for updates"),
                 updTag.length() > 0 ? S("Toca para descargar e instalar", "Tap to download and install") : S("Versión actual: ", "Current version: ") + currentVersionName(),
                 false);
         try {
@@ -3777,6 +3806,7 @@ public class MainActivity extends Activity {
             updateTitle = (TextView) rowCol.getChildAt(0);
             if (rowCol.getChildCount() > 1) updateSub = (TextView) rowCol.getChildAt(1);
         } catch (Exception ignored) { }
+        paintUpdateRow();
         if (updTag.length() > 0 && updateTitle != null) {
             updateTitle.setTextColor(col("green"));
         }
@@ -3796,7 +3826,7 @@ public class MainActivity extends Activity {
         rowSep(credCard);
         rowInfo(credCard, S("Creación original", "Original creation"), S("App hecha de cero por Jdvibes", "App built from scratch by Jdvibes"), false);
         rowSep(credCard);
-        rowInfo(credCard, S("Inspirada en", "Inspired by"), S("La utilidad de las apps de tasas 🇻🇪", "The usefulness of rate apps 🇻🇪"), false);
+        rowInfo(credCard, S("Inspirada en", "Inspired by"), S("La utilidad de las apps de tasas en Venezuela", "The usefulness of rate apps in Venezuela"), false);
 
         box.addView(sectionLabel(S("Fuentes de datos", "Data sources")));
         LinearLayout dataCard = card(box);
@@ -3827,7 +3857,7 @@ public class MainActivity extends Activity {
         rowCheck(privCard, S("Historial compartido: solo cifras, sin datos personales", "Shared history: numbers only, no personal data"));
         rowCheck(privCard, S("Animaciones fluidas · hasta 120 Hz", "Smooth animations · up to 120 Hz"));
 
-        TextView footer = tvIos("© 2026 Jdvibes · Super Cambio\nHecho con ❤️ para Venezuela 🇻🇪", 12, false, col("text_secondary"));
+        TextView footer = tvIos("© 2026 Jdvibes · Super Cambio\nHecho con cariño para Venezuela", 12, false, col("text_secondary"));
         footer.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         flp.setMargins(0, dp(22), 0, 0);
@@ -4035,8 +4065,12 @@ public class MainActivity extends Activity {
 
     private void rowLink(LinearLayout card, String title, String sub, final String url) {
         LinearLayout row = rowBase(card, title, sub, true);
-        TextView chev = tv("›", 22, false, col("text_secondary"));
-        row.addView(chev);
+        ImageView chev = new ImageView(this);
+        chev.setImageResource(R.drawable.ic_chevron_right);
+        chev.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
+        LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        chLp.setMargins(dp(8), 0, 0, 0);
+        row.addView(chev, chLp);
         row.setClickable(true);
         pressScale(row);
         row.setOnClickListener(new View.OnClickListener() {
@@ -4052,8 +4086,10 @@ public class MainActivity extends Activity {
 
     private void rowCheck(LinearLayout card, String title) {
         LinearLayout row = rowBase(card, title, null, false);
-        TextView check = tv("✓", 16, true, col("green"));
-        row.addView(check);
+        ImageView check = new ImageView(this);
+        check.setImageResource(R.drawable.ic_check_circle);
+        check.setColorFilter(col("green"), android.graphics.PorterDuff.Mode.SRC_IN);
+        row.addView(check, new LinearLayout.LayoutParams(dp(18), dp(18)));
     }
 
     // ================= RED Y REFRESCO =================
@@ -4132,8 +4168,8 @@ public class MainActivity extends Activity {
                         }
                         updateAllPages();
                         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
-                        if (ok) pageRates.status.setText(TextUtils.concat(brandSpan(S("✅ Actualizado: ", "✅ Updated: ")), f.format(new Date())));
-                        else pageRates.status.setText(brandSpan(S("📴 Sin conexión · mostrando últimos datos", "📴 Offline · showing last data")));
+                        if (ok) pageRates.status.setText(TextUtils.concat(iconText(R.drawable.ic_check_circle, S("Actualizado: ", "Updated: "), 14, col("green")), f.format(new Date())));
+                        else pageRates.status.setText(iconText(R.drawable.ic_wifi_off, S("Sin conexión · mostrando últimos datos", "Offline · showing last data"), 14, col("text_secondary")));
                         pageRates.setBusy(false);
                         syncSharedHist(false);
                     }
@@ -4169,7 +4205,7 @@ public class MainActivity extends Activity {
         if (!showLogo) ivLp.height = 0;
         c.addView(iv, ivLp);
 
-        TextView t = tv(S("⬇️ Actualización disponible", "⬇️ Update available"), 18, true, col("text_primary"));
+        TextView t = tvIcon(R.drawable.ic_download, S("Actualización disponible", "Update available"), 18, true, col("text_primary"), 20);
         t.setGravity(Gravity.CENTER);
         c.addView(t, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -4228,7 +4264,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView btnDownload(final Dialog d) {
-        TextView b = tv(S("⬇️ Descargar", "⬇️ Download"), 14, true, Color.WHITE);
+        TextView b = tvIcon(R.drawable.ic_download, S("Descargar", "Download"), 14, true, Color.WHITE, 17);
         b.setGravity(Gravity.CENTER);
         b.setBackground(rounded(col("accent"), 23));
         b.setMinHeight(dp(46));
@@ -4280,7 +4316,7 @@ public class MainActivity extends Activity {
         c.setPadding(p0, p0, p0, p0);
         c.setBackground(rounded(col("card_bg"), 24));
 
-        TextView t = tv(S("⬇️ Descargar Super Cambio ", "⬇️ Download Super Cambio ") + updTag, 18, true, col("text_primary"));
+        TextView t = tvIcon(R.drawable.ic_download, S("Descargar Super Cambio ", "Download Super Cambio ") + updTag, 18, true, col("text_primary"), 20);
         c.addView(t);
         c.addView(tv(S("Se descargará la versión ", "Version ") + updTag + S(" desde GitHub", " will be downloaded from GitHub"), 13, false, col("text_secondary")),
                 new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -4317,7 +4353,7 @@ public class MainActivity extends Activity {
                 haptic(v);
                 dlCancel = true;
                 d.dismiss();
-                Toast.makeText(MainActivity.this, S("⏸ Descarga cancelada", "⏸ Download canceled"), Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, S("Descarga cancelada", "Download canceled"), Toast.LENGTH_SHORT).show();
             }
         });
         c.addView(cancel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -4383,12 +4419,12 @@ public class MainActivity extends Activity {
                     public void run() {
                         if (!fOk) {
                             if (!fCanceled) {
-                                pct.setText(brandSpan(S("❌ Error de descarga · revisa tu conexión", "❌ Download failed · check your connection")));
-                                Toast.makeText(MainActivity.this, S("❌ No se pudo descargar", "❌ Couldn't download"), Toast.LENGTH_LONG).show();
+                                pct.setText(iconText(R.drawable.ic_x_circle, S("Error de descarga · revisa tu conexión", "Download failed · check your connection"), 14, col("red")));
+                                Toast.makeText(MainActivity.this, S("No se pudo descargar", "Couldn't download"), Toast.LENGTH_LONG).show();
                             }
                             return;
                         }
-                        pct.setText(brandSpan(S("✅ Descarga completa · preparando instalación…", "✅ Download complete · preparing install…")));
+                        pct.setText(iconText(R.drawable.ic_check_circle, S("Descarga completa · preparando instalación…", "Download complete · preparing install…"), 14, col("green")));
                         installApk(fileName);
                         d.dismiss();
                     }
@@ -4400,7 +4436,7 @@ public class MainActivity extends Activity {
     private void installApk(final String fileName) {
         File f = new File(getCacheDir(), fileName);
         if (!f.exists() || f.length() < 1024) {
-            Toast.makeText(this, S("❌ El archivo de instalación no es válido", "❌ Installer file is invalid"), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, S("El archivo de instalación no es válido", "Installer file is invalid"), Toast.LENGTH_LONG).show();
             return;
         }
         if (Build.VERSION.SDK_INT >= 26) {
@@ -4415,7 +4451,7 @@ public class MainActivity extends Activity {
                     return;
                 } catch (Exception e) {
                     pendingApkFile = "";
-                    Toast.makeText(this, S("⚠️ Activa \"Fuentes desconocidas\" para esta app en Ajustes", "⚠️ Enable \"Unknown sources\" for this app in Settings"), Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, S("Activa \"Fuentes desconocidas\" para esta app en Ajustes", "Enable \"Unknown sources\" for this app in Settings"), Toast.LENGTH_LONG).show();
                 }
             }
         }
@@ -4448,7 +4484,7 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            Toast.makeText(this, S("❌ Permiso de instalación denegado", "❌ Install permission denied"), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, S("Permiso de instalación denegado", "Install permission denied"), Toast.LENGTH_LONG).show();
         }
         if (requestCode == REQ_PICK_JSON && resultCode == RESULT_OK && data != null && data.getData() != null) {
             InputStream in = null;
@@ -4473,7 +4509,7 @@ public class MainActivity extends Activity {
                 out = getContentResolver().openOutputStream(data.getData());
                 out.write(json.getBytes(StandardCharsets.UTF_8));
                 out.flush();
-                Toast.makeText(this, S("✅ Respaldo guardado", "✅ Backup saved"), Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, S("Respaldo guardado", "Backup saved"), Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
                 Toast.makeText(this, S("No se pudo guardar", "Couldn't save"), Toast.LENGTH_SHORT).show();
             } finally {
@@ -4546,7 +4582,7 @@ public class MainActivity extends Activity {
                         if (!fOk) {
                             // No tocar prefs ni el estado: la verificación FALLÓ
                             if (manual) Toast.makeText(MainActivity.this,
-                                    S("📴 Sin conexión · no se pudo buscar actualizaciones", "📴 Offline · couldn't check for updates"),
+                                    S("Sin conexión · no se pudo buscar actualizaciones", "Offline · couldn't check for updates"),
                                     Toast.LENGTH_LONG).show();
                             return;
                         }
@@ -4566,14 +4602,14 @@ public class MainActivity extends Activity {
                         if (isNew) {
                             if (manual) {
                                 Toast.makeText(MainActivity.this,
-                                        S("🔔 Nueva versión disponible: ", "🔔 New version available: ") + fTag,
+                                        S("Nueva versión disponible: ", "New version available: ") + fTag,
                                         Toast.LENGTH_LONG).show();
                             } else {
                                 updatePrompt();
                             }
                         } else if (manual) {
                             Toast.makeText(MainActivity.this,
-                                    S("✅ Ya tienes la última versión", "✅ You're up to date"),
+                                    S("Ya tienes la última versión", "You're up to date"),
                                     Toast.LENGTH_LONG).show();
                         }
                     }
@@ -4594,11 +4630,11 @@ public class MainActivity extends Activity {
         try {
             if (updateTitle == null || updateSub == null) return;
             if (updTag.length() > 0) {
-                updateTitle.setText(TextUtils.concat(brandSpan(S("⬇️ Nueva versión disponible: ", "⬇️ New version available: ")), updTag));
+                updateTitle.setText(TextUtils.concat(iconText(R.drawable.ic_download, S("Nueva versión disponible: ", "New version available: "), 15, col("green")), updTag));
                 updateTitle.setTextColor(col("green"));
                 updateSub.setText(S("Toca para descargar e instalar", "Tap to download and install"));
             } else {
-                updateTitle.setText(S("Buscar actualizaciones", "Check for updates"));
+                updateTitle.setText(iconText(R.drawable.ic_refresh, S("Buscar actualizaciones", "Check for updates"), 15, col("text_primary")));
                 updateTitle.setTextColor(col("text_primary"));
                 updateSub.setText(S("Versión actual: ", "Current version: ") + currentVersionName());
             }
@@ -4859,7 +4895,7 @@ public class MainActivity extends Activity {
             if (cm != null) {
                 cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text));
                 haptic(v);
-                Toast.makeText(this, S("📋 Copiado: ", "📋 Copied: ") + text, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, S("Copiado: ", "Copied: ") + text, Toast.LENGTH_SHORT).show();
             }
         } catch (Exception ignored) { }
     }
