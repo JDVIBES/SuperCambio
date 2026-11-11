@@ -193,12 +193,13 @@ public class MainActivity extends Activity {
     private boolean tickerOn = false;
     private final Runnable blurTick = new Runnable() {
         public void run() {
-            if (!blurActive()) { tickerOn = false; return; }
-            if (blurDirty) {
-                blurDirty = false;
-                doBlur();
-            }
-            ui.postDelayed(this, 190);
+            // El ticker SOLO vive mientras hay algo pendiente: antes se reprogramaba
+            // siempre que el vidrio estaba activo (5 despertares por segundo para
+            // siempre, aun sin hacer scroll).
+            if (!blurActive() || !blurDirty) { tickerOn = false; return; }
+            blurDirty = false;
+            doBlur();
+            if (blurDirty) ui.postDelayed(this, 190);
         }
     };
 
@@ -569,6 +570,18 @@ public class MainActivity extends Activity {
             }
         });
         return v;
+    }
+
+    // Envuelve un botón pequeño en una caja de 48dp: el ÁREA TÁCTIL crece a 48dp sin que
+    // cambie el aspecto (el icono y su fondo siguen siendo pequeños).
+    private FrameLayout touch48(View v, View.OnClickListener click) {
+        FrameLayout box = new FrameLayout(this);
+        FrameLayout.LayoutParams c = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        box.addView(v, c);
+        pressScale(box);
+        box.setOnClickListener(click);
+        return box;
     }
 
     // ================= PREFERENCIAS E HISTORIAL =================
@@ -1079,7 +1092,11 @@ public class MainActivity extends Activity {
             for (int i = 0; i < 2; i++) {
                 int nw = Math.max(2, cur.getWidth() / 2);
                 int nh = Math.max(2, cur.getHeight() / 2);
-                cur = Bitmap.createScaledBitmap(cur, nw, nh, true);
+                Bitmap next = Bitmap.createScaledBitmap(cur, nw, nh, true);
+                // El bitmap intermedio se quedaba huérfano (~32 KB por captura): se
+                // recicla. stripBuf NO se recicla: es el búfer que se reutiliza.
+                if (cur != stripBuf && cur != next) cur.recycle();
+                cur = next;
             }
 
             // 3) Box blur más fuerte (radio 4, 2 pasadas) sobre ~1 KB
@@ -2634,6 +2651,7 @@ public class MainActivity extends Activity {
             dateAct.setBackground(inputSurface(14));
             dateAct.setElevation(0);
             dateAct.setPadding(dp(13), dp(13), dp(13), dp(13));
+            dateAct.setContentDescription(S("Consultar la próxima tasa del BCV", "Check the BCV's next rate"));
             dateAct.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { fetchNextManual(); }
             });
@@ -2953,11 +2971,11 @@ public class MainActivity extends Activity {
             resetBtn.setBackground(inputSurface(999));
             resetBtn.setVisibility(View.GONE);
             resetBtn.setContentDescription(S("Reiniciar zoom", "Reset zoom"));
-            pressScale(resetBtn);
-            resetBtn.setOnClickListener(new View.OnClickListener() {
+            // La caja de 48dp es la que se muestra/oculta (windowChanged) y la que se toca
+            View resetBox = touch48(resetBtn, new View.OnClickListener() {
                 public void onClick(View v) { haptic(v); chart.resetWindow(); }
             });
-            chartHead.addView(resetBtn, new LinearLayout.LayoutParams(dp(32), dp(32)));
+            chartHead.addView(resetBox, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
             // Compartir la gráfica como imagen con la marca de la app
             ImageView shareBtn = new ImageView(MainActivity.this);
@@ -2966,13 +2984,12 @@ public class MainActivity extends Activity {
             shareBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
             shareBtn.setBackground(inputSurface(999));
             shareBtn.setContentDescription(S("Compartir la gráfica", "Share the chart"));
-            pressScale(shareBtn);
-            shareBtn.setOnClickListener(new View.OnClickListener() {
+            View shareBox = touch48(shareBtn, new View.OnClickListener() {
                 public void onClick(View v) { haptic(v); shareChart(); }
             });
-            LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(dp(32), dp(32));
-            shLp.setMargins(dp(6), 0, 0, 0);
-            chartHead.addView(shareBtn, shLp);
+            LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(dp(48), dp(48));
+            shLp.setMargins(dp(2), 0, 0, 0);
+            chartHead.addView(shareBox, shLp);
 
             chart = new ChartView();
             chartCard.addView(chart, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
@@ -2984,7 +3001,7 @@ public class MainActivity extends Activity {
             chartCard.addView(overview, ovLp);
             chart.setOverview(overview);
             overview.setChart(chart);
-            chart.setResetBtn(resetBtn);
+            chart.setResetBtn(resetBox);
             chart.setWinLabel(winLabel);
 
             LinearLayout stats = new LinearLayout(MainActivity.this);
@@ -4253,19 +4270,24 @@ public class MainActivity extends Activity {
             card.addView(swapWrap, swLp);
 
             int acc = col("accent");
-            ImageView swapIv = new ImageView(MainActivity.this);
+            final ImageView swapIv = new ImageView(MainActivity.this);
             swapIv.setImageResource(R.drawable.ic_swap);
             swapIv.setColorFilter(acc, android.graphics.PorterDuff.Mode.SRC_IN);
             swapIv.setPadding(dp(11), dp(11), dp(11), dp(11));
             swapIv.setBackground(blurOn ? glassBg(999, true)
                     : rounded(Color.argb(36, Color.red(acc), Color.green(acc), Color.blue(acc)), 999));
-            FrameLayout.LayoutParams fsw = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER);
-            swapWrap.addView(pressScale(swapIv), fsw);
-            swapIv.setOnClickListener(new View.OnClickListener() {
+            swapIv.setContentDescription(S("Invertir la conversión", "Swap conversion direction"));
+            // Caja de 48dp: el área táctil crece sin cambiar el aspecto del botón (44dp)
+            FrameLayout swapBox = new FrameLayout(MainActivity.this);
+            swapBox.addView(swapIv, new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER));
+            pressScale(swapBox);
+            FrameLayout.LayoutParams fsw = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER);
+            swapWrap.addView(swapBox, fsw);
+            swapBox.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     invert = !invert;
                     haptic(v);
-                    v.animate().rotationBy(180f).setDuration(300).setInterpolator(decel).start();
+                    swapIv.animate().rotationBy(180f).setDuration(300).setInterpolator(decel).start();
                     recompute();
                 }
             });
@@ -5461,21 +5483,29 @@ public class MainActivity extends Activity {
                     FileOutputStream fo = new FileOutputStream(out);
                     byte[] buf = new byte[8192];
                     long total = 0;
+                    long lastPost = 0;
                     int n;
                     while ((n = in.read(buf)) > 0 && !dlCancel) {
                         total += n;
                         if (total > APK_MAX_BYTES) throw new java.io.IOException("APK demasiado grande");
                         fo.write(buf, 0, n);
+                        // El progreso se postea cada 256 KB: antes era en cada bloque de 8 KB
+                        // (miles de mensajes al hilo principal → jank).
+                        if (total - lastPost < 262144L) continue;
+                        lastPost = total;
                         if (len > 0) {
                             final int pc = (int) (total * 100 / len);
                             final String st = fmtMB(total) + S(" de ", " of ") + fmtMB(len);
                             ui.post(new Runnable() {
-                                public void run() { pb.setProgress(pc); pct.setText(pc + "% · " + st); }
+                                public void run() {
+                                    if (destroyed) return;
+                                    pb.setProgress(pc); pct.setText(pc + "% · " + st);
+                                }
                             });
                         } else {
                             final String st = fmtMB(total);
                             ui.post(new Runnable() {
-                                public void run() { pct.setText(st); }
+                                public void run() { if (destroyed) return; pct.setText(st); }
                             });
                         }
                     }
@@ -6102,8 +6132,22 @@ public class MainActivity extends Activity {
     private void rebuildUiAnimated() {
         try {
             final int keepTab = currentTab;
-            final Bitmap snap = Bitmap.createBitmap(rootF.getWidth(), rootF.getHeight(), Bitmap.Config.ARGB_8888);
-            rootF.draw(new Canvas(snap));
+            final int rw = rootF.getWidth(), rh = rootF.getHeight();
+            if (rw <= 0 || rh <= 0) {
+                // Sin layout todavía: se reconstruye sin crossfade (un bitmap de 1 px
+                // estirado se vería como un flash).
+                buildUi();
+                currentTab = -1;
+                selectTab(keepTab < 0 ? 0 : keepTab);
+                updateAllPages();
+                return;
+            }
+            // Captura a MEDIA resolución: a resolución completa eran ~10 MB asignados en el
+            // hilo de UI en cada cambio de tema/acento/idioma. El overlay lo estira (FIT_XY).
+            final Bitmap snap = Bitmap.createBitmap(Math.max(1, rw / 2), Math.max(1, rh / 2), Bitmap.Config.ARGB_8888);
+            Canvas sc = new Canvas(snap);
+            sc.scale(0.5f, 0.5f);
+            rootF.draw(sc);
             buildUi();
             final ImageView overlay = new ImageView(this);
             overlay.setImageBitmap(snap);
