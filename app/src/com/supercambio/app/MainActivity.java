@@ -148,6 +148,7 @@ public class MainActivity extends Activity {
     private boolean langEn = false;
     private boolean widgetClear = false;
     private boolean dailyNotif = false;
+    private boolean watchOn = false;   // avisar en segundo plano cuando cambia la tasa
 
     private double bcvUsd, bcvEur, usdt, paralelo;
     private double prevUsd, prevEur, prevUsdt, prevPar;
@@ -191,15 +192,18 @@ public class MainActivity extends Activity {
     private Bitmap lastBlurBitmap;
     private boolean blurPending = false;
     private boolean tickerOn = false;
+    private long lastBlurNudge = 0;
     private final Runnable blurTick = new Runnable() {
         public void run() {
-            // El ticker SOLO vive mientras hay algo pendiente: antes se reprogramaba
-            // siempre que el vidrio estaba activo (5 despertares por segundo para
-            // siempre, aun sin hacer scroll).
-            if (!blurActive() || !blurDirty) { tickerOn = false; return; }
-            blurDirty = false;
-            doBlur();
-            if (blurDirty) ui.postDelayed(this, 190);
+            // El ticker SOLO vive mientras se está haciendo scroll: si pasan 400 ms sin
+            // mover la página se para (antes se reprogramaba siempre: 5 despertares por
+            // segundo para siempre). NO puede comprobar solo `blurDirty`: el tick se come
+            // esa bandera antes de dibujar, así que nunca se reprogramaba y el vidrio
+            // dejaba de seguir al scroll para siempre.
+            if (!blurActive()) { tickerOn = false; return; }
+            if (System.currentTimeMillis() - lastBlurNudge > 400L) { tickerOn = false; return; }
+            if (blurDirty) { blurDirty = false; doBlur(); }
+            ui.postDelayed(this, 190);
         }
     };
 
@@ -221,6 +225,7 @@ public class MainActivity extends Activity {
         darkLogo = p.getBoolean("dark_logo", false);
         hapticsOn = p.getBoolean("haptics_on", true);
         dailyNotif = p.getBoolean("daily_notif", false);
+        watchOn = p.getBoolean("watch_on", false);
         accentIdx = p.getInt("accent_idx", 0);
         langEn = p.getBoolean("lang_en", false);
         widgetClear = p.getBoolean("widget_clear", false);
@@ -253,6 +258,7 @@ public class MainActivity extends Activity {
         selectTab(0);
         updateAllPages();
         if (dailyNotif) RateAlarm.schedule(this, true);
+        if (watchOn) RateAlarm.scheduleWatch(this);
         refresh();
         syncSharedHist(false);
         checkForUpdates(false);
@@ -650,6 +656,7 @@ public class MainActivity extends Activity {
         e.putBoolean("dark_logo", darkLogo);
         e.putBoolean("haptics_on", hapticsOn);
         e.putBoolean("daily_notif", dailyNotif);
+        e.putBoolean("watch_on", watchOn);
         e.putInt("accent_idx", accentIdx);
         e.putBoolean("lang_en", langEn);
         e.putBoolean("widget_clear", widgetClear);
@@ -665,6 +672,39 @@ public class MainActivity extends Activity {
         e.putLong("tsEur", tEur);
         e.putLong("tsUsdt", tUsdt);
         e.putLong("tsPar", tPar);
+        // El aviso diario puede haber guardado una tasa MÁS NUEVA que la que tiene la app en
+        // memoria: si se escribiera la vieja, se perdería la nueva (y el widget, que lee de
+        // las prefs, volvería al valor anterior). Se adopta la que ya está guardada.
+        try {
+            long pUsd = p.getLong("tsUsd", 0);
+            if (pUsd > tUsd) {
+                tUsd = pUsd;
+                bcvUsd = Double.longBitsToDouble(p.getLong("usd", 0));
+                e.putLong("usd", Double.doubleToRawLongBits(bcvUsd));
+                e.putLong("tsUsd", tUsd);
+            }
+            long pEur = p.getLong("tsEur", 0);
+            if (pEur > tEur) {
+                tEur = pEur;
+                bcvEur = Double.longBitsToDouble(p.getLong("eur", 0));
+                e.putLong("eur", Double.doubleToRawLongBits(bcvEur));
+                e.putLong("tsEur", tEur);
+            }
+            long pUsdt = p.getLong("tsUsdt", 0);
+            if (pUsdt > tUsdt) {
+                tUsdt = pUsdt;
+                usdt = Double.longBitsToDouble(p.getLong("usdt", 0));
+                e.putLong("usdt", Double.doubleToRawLongBits(usdt));
+                e.putLong("tsUsdt", tUsdt);
+            }
+            long pPar = p.getLong("tsPar", 0);
+            if (pPar > tPar) {
+                tPar = pPar;
+                paralelo = Double.longBitsToDouble(p.getLong("par", 0));
+                e.putLong("par", Double.doubleToRawLongBits(paralelo));
+                e.putLong("tsPar", tPar);
+            }
+        } catch (Exception ignored) { }
         try {
             e.putString("hist_usd", histUsd.toString());
             e.putString("hist_eur", histEur.toString());
@@ -827,6 +867,16 @@ public class MainActivity extends Activity {
         if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) return false;
         int h = c.get(Calendar.HOUR_OF_DAY), m = c.get(Calendar.MINUTE);
         return h > 15 || (h == 15 && m >= 30);
+    }
+
+    // ¿Son el mismo día natural en hora de Venezuela?
+    private boolean sameDay(long a, long b) {
+        Calendar ca = Calendar.getInstance(TimeZone.getTimeZone("America/Caracas"));
+        Calendar cb = Calendar.getInstance(TimeZone.getTimeZone("America/Caracas"));
+        ca.setTimeInMillis(a);
+        cb.setTimeInMillis(b);
+        return ca.get(Calendar.YEAR) == cb.get(Calendar.YEAR)
+                && ca.get(Calendar.DAY_OF_YEAR) == cb.get(Calendar.DAY_OF_YEAR);
     }
 
     // Sello de la API para las tasas oficiales: 00:00 de Caracas del día de publicación.
@@ -1053,6 +1103,7 @@ public class MainActivity extends Activity {
     private void nudgeBlur() {
         if (!blurActive()) return;
         blurDirty = true;
+        lastBlurNudge = System.currentTimeMillis();
         if (!tickerOn) {
             tickerOn = true;
             ui.postDelayed(blurTick, 60);
@@ -1178,15 +1229,38 @@ public class MainActivity extends Activity {
 
     private JSONArray loadProfiles() {
         try {
-            return new JSONArray(getSharedPreferences(PREFS, MODE_PRIVATE).getString("pay_profiles", "[]"));
+            String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString("pay_profiles", "[]");
+            profilesRaw = raw;
+            profilesBroken = false;
+            return new JSONArray(raw);
         } catch (Exception e) {
+            // El dato guardado está corrupto: NO se devuelve una lista vacía como si no
+            // hubiera perfiles (la siguiente escritura los borraba para siempre).
+            profilesBroken = true;
             return new JSONArray();
         }
     }
 
+    private String profilesRaw = null;
+    private boolean profilesBroken = false;
+
     private void saveProfiles(JSONArray a) {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("pay_profiles", a.toString()).apply();
+        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        SharedPreferences.Editor e = sp.edit();
+        if (profilesBroken && profilesRaw != null && profilesRaw.length() > 0) {
+            // Antes de pisar un dato corrupto se guarda una copia aparte: así no se pierde
+            // para siempre (y el usuario no pierde sus perfiles de pago sin avisar).
+            e.putString("pay_profiles_bak", profilesRaw);
+        }
+        e.putString("pay_profiles", a.toString());
+        e.apply();
+        boolean backed = profilesBroken;
+        profilesBroken = false;
+        profilesRaw = a.toString();
         if (pageProfiles != null) pageProfiles.refresh();
+        if (backed) {
+            Toast.makeText(this, S("Los perfiles guardados estaban dañados: se guardó una copia de seguridad", "Saved profiles were damaged: a backup copy was kept"), Toast.LENGTH_LONG).show();
+        }
     }
 
     private Dialog curSheet;
@@ -1401,6 +1475,12 @@ public class MainActivity extends Activity {
                         }
                         nv.put(fields[i], val);
                     }
+                    // No se guardan perfiles vacíos: antes se podían guardar (" · ") y
+                    // luego el QR fallaba con un error que no explicaba qué faltaba.
+                    if (!profileHasRequired(t, nv)) {
+                        Toast.makeText(MainActivity.this, S("Completa los campos obligatorios", "Fill in the required fields"), Toast.LENGTH_LONG).show();
+                        return;
+                    }
                     JSONObject prof = new JSONObject();
                     prof.put("t", PAY_TYPES[t][0]);
                     prof.put("v", nv);
@@ -1415,6 +1495,19 @@ public class MainActivity extends Activity {
         });
         row.addView(save);
         c.addView(row);
+    }
+
+    // Campos obligatorios de cada tipo de perfil (el resto es opcional).
+    private boolean profileHasRequired(int t, JSONObject v) {
+        String[] req;
+        if (t == 0) req = new String[]{"Banco", "Teléfono", "Cédula"};        // pago móvil (el QR los usa)
+        else if (t == 1) req = new String[]{"Banco", "Número de cuenta", "Titular"};
+        else if (t == 2) req = new String[]{"Binance ID / Pay ID", "Titular"};
+        else req = new String[]{"Correo o teléfono"};
+        for (int i = 0; i < req.length; i++) {
+            if (v.optString(req[i], "").trim().length() == 0) return false;
+        }
+        return true;
     }
 
     private void showEdit(final int t, final int profIdx) {
@@ -1440,7 +1533,15 @@ public class MainActivity extends Activity {
             TextView cp = tv(S("⧉ Copiar", "⧉ Copy"), 12, true, col("accent"));
             cp.setPadding(dp(2), 0, 0, dp(10));
             cp.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View vv) { copyClip(ptField(t, fi), fe.getText().toString(), fe); }
+                public void onClick(View vv) {
+                    // El campo del Banco guarda el CÓDIGO en el tag y muestra
+                    // "0102 · Banco de Venezuela": copiar el texto metía el rótulo en el
+                    // portapapeles (y al pegarlo en la app de pagos mandaba un código malo).
+                    Object tg = fe.getTag();
+                    String val = (tg instanceof String && ((String) tg).length() > 0)
+                            ? (String) tg : fe.getText().toString();
+                    copyClip(ptField(t, fi), val, fe);
+                }
             });
             c.addView(cp);
         }
@@ -1462,6 +1563,12 @@ public class MainActivity extends Activity {
         yes.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 JSONArray a = loadProfiles();
+                if (idx < 0 || idx >= a.length()) {
+                    // El índice quedó viejo (la lista cambió): no se borra nada y no se
+                    // anuncia un borrado que no ocurrió.
+                    closeSheet();
+                    return;
+                }
                 JSONArray b = new JSONArray();
                 for (int i = 0; i < a.length(); i++) if (i != idx) b.put(a.opt(i));
                 saveProfiles(b);
@@ -1541,12 +1648,17 @@ public class MainActivity extends Activity {
         if (h == null) return;
         java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", new java.util.Locale("es", "VE"));
         df.setTimeZone(java.util.TimeZone.getTimeZone("America/Caracas"));
+        // Separador y decimal según el idioma de la app: en español el CSV se abre bien en
+        // Excel/Sheets de Venezuela (";" y coma decimal); en inglés, con coma y punto.
+        String sep = langEn ? "," : ";";
         try {
             for (int i = 0; i < h.length(); i++) {
                 JSONObject o = h.getJSONObject(i);
-                sb.append(name.replace(",", " ")).append(',')
-                  .append('"').append(df.format(new java.util.Date(o.optLong("t")))).append('"').append(',')
-                  .append(String.format(java.util.Locale.US, "%.4f", o.optDouble("v", 0))).append('\n');
+                String val = String.format(java.util.Locale.US, "%.4f", o.optDouble("v", 0));
+                if (!langEn) val = val.replace('.', ',');
+                sb.append(name.replace(sep, " ")).append(sep)
+                  .append('"').append(df.format(new java.util.Date(o.optLong("t")))).append('"').append(sep)
+                  .append(val).append('\n');
             }
         } catch (Exception ignored) { }
     }
@@ -1555,7 +1667,10 @@ public class MainActivity extends Activity {
         java.io.OutputStream os = null;
         try {
             StringBuilder sb = new StringBuilder();
-            sb.append("tasa,fecha,valor_bs\n");
+            String sep = langEn ? "," : ";";
+            sb.append(S("tasa", "rate")).append(sep)
+              .append(S("fecha", "date")).append(sep)
+              .append(S("valor_bs", "value_bs")).append('\n');
             appendCsv(sb, S("Dólar BCV", "BCV Dollar"), chgUsd);
             appendCsv(sb, S("Dólar paralelo", "Parallel dollar"), chgPar);
             appendCsv(sb, S("Euro BCV", "BCV Euro"), chgEur);
@@ -1978,7 +2093,7 @@ public class MainActivity extends Activity {
         Paint titleP = siPaint(priCol, 50, true);
         cv.drawText("Super Cambio", tx, siBase(titleP, pad + 56), titleP);
         Paint typeP = siLight(secCol, 34);
-        cv.drawText(PAY_TYPES[t][1], tx, siBase(typeP, pad + 106), typeP);
+        cv.drawText(ptName(t), tx, siBase(typeP, pad + 106), typeP);   // traducido como el resto
 
         // Separador
         Paint sepP = new Paint();
@@ -2250,7 +2365,9 @@ public class MainActivity extends Activity {
         Paint titleP = siPaint(priCol, 50, true);
         cv.drawText("Super Cambio", tx, siBase(titleP, pad + 56), titleP);
         Paint typeP = siLight(secCol, 34);
-        SimpleDateFormat df = new SimpleDateFormat("d 'de' MMMM, yyyy", new Locale("es"));
+        SimpleDateFormat df = new SimpleDateFormat(langEn ? "d MMMM, yyyy" : "d 'de' MMMM, yyyy",
+                langEn ? Locale.US : new Locale("es", "VE"));
+        df.setTimeZone(TimeZone.getTimeZone("America/Caracas"));   // la fecha es la de Venezuela
         String fecha = S("Tasas de hoy · ", "Today's rates · ") + df.format(new Date());
         siFit(typeP, fecha, W - tx - 40);
         cv.drawText(fecha, tx, siBase(typeP, pad + 106), typeP);
@@ -2445,8 +2562,10 @@ public class MainActivity extends Activity {
             }
             double pct = (v - prevV) / prevV * 100.0;
             if (Math.abs(pct) < 0.0001) pct = 0;
-            boolean up = pct >= 0;
-            int c = up ? col("green") : col("red");
+            // Sin cambio real no es "subió": la flecha verde con 0,0 % mentía.
+            boolean flat = Math.abs(pct) < 0.0001;
+            boolean up = pct > 0;
+            int c = flat ? col("text_secondary") : (up ? col("green") : col("red"));
             GradientDrawable pg = rounded(Color.argb(38, Color.red(c), Color.green(c), Color.blue(c)), 13);
             pill.setBackground(pg);
             pill.setTextColor(c);
@@ -2729,7 +2848,11 @@ public class MainActivity extends Activity {
             SimpleDateFormat df = new SimpleDateFormat("EEEE, dd/MM/yy", new Locale("es", "VE"));
             String dstr = df.format(new Date(next));
             dstr = Character.toUpperCase(dstr.charAt(0)) + dstr.substring(1);
-            if (diff <= 0) {
+            // ¿Ya pasó la hora de publicación y seguimos con la tasa de ayer? Entonces la
+            // app debe buscarla sola. Antes esta rama era INALCANZABLE (computeNextPublish
+            // siempre devuelve un instante futuro), así que la app nunca detectaba sola una
+            // tasa nueva y el texto "revisando cada minuto" era mentira.
+            if (afterBcvSlot() && !sameDay(tUsd, now)) {
                 nextCountdown.setTextColor(col("text_primary"));
                 nextCountdown.setText(S("¡Atento!", "Stay tuned!"));
                 datePill.setText(iconText(R.drawable.ic_eye, S("Ver nueva tasa", "View new rate"), 16, col("green")));
@@ -2766,9 +2889,11 @@ public class MainActivity extends Activity {
                             }
                         }
                     } catch (Exception e) { netErr = String.valueOf(e.getMessage()); }
+                    boolean bcvOk = false;
                     if (newRate <= 0 || newTs <= tUsd) {
                         double bcv = fetchBcvSite();
                         long nowMs = System.currentTimeMillis();
+                        bcvOk = bcv > 0;      // el sitio del BCV respondió (o no)
                         if (bcv > 0 && (Math.abs(bcv - bcvUsd) > 0.00001 || afterBcvSlot())) {
                             newRate = bcv;
                             // El sitio del BCV no trae fecha: se usa la MISMA convención que la
@@ -2783,6 +2908,7 @@ public class MainActivity extends Activity {
                     // El error se captura AQUÍ: antes la UI lo borraba (netErr = null) antes de
                     // leerlo y la rama "Sin conexión con el BCV" nunca se ejecutaba.
                     final String fErr = netErr;
+                    final boolean fBcvOk = bcvOk;
                     final double fRate = newRate;
                     final long fTs = newTs;
                     ui.post(new Runnable() {
@@ -2792,7 +2918,11 @@ public class MainActivity extends Activity {
                             if (destroyed) return;
                             if (!nextExpanded) return;
                             if (fRate > 0 && fTs > tUsd) {
-                                prevUsd = bcvUsd;
+                                // Solo se celebra si el VALOR cambió: el respaldo del sitio del
+                                // BCV devuelve la tasa vieja si la web aún no actualizó, y eso
+                                // anunciaba "¡Nueva tasa publicada!" con la misma cifra.
+                                boolean reallyChanged = Math.abs(fRate - bcvUsd) > 0.00001;
+                                if (reallyChanged) prevUsd = bcvUsd;
                                 bcvUsd = fRate;
                                 tUsd = fTs;
                                 seedHistIfEmpty(histUsd, bcvUsd, tUsd);
@@ -2800,14 +2930,16 @@ public class MainActivity extends Activity {
                                 recordChange(chgUsd, bcvUsd, tUsd, DEBOUNCE_MS);
                                 saveAll();
                                 updateAllPages();
-                                celebrateUntil = System.currentTimeMillis() + 10000;
-                                haptic(nextCountdown);
-                                pageRates.nextStatus.setText(iconText(R.drawable.ic_sparkles, S("¡Nueva tasa publicada!", "New rate published!"), 13, col("green")));
-                                nextCountdown.setTextColor(col("green"));
-                                nextCountdown.setText(S("¡Nueva tasa publicada!", "New rate published!"));
-                                nextCountdown.setScaleX(1.15f);
-                                nextCountdown.setScaleY(1.15f);
-                                nextCountdown.animate().scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(pop).start();
+                                if (reallyChanged) {
+                                    celebrateUntil = System.currentTimeMillis() + 10000;
+                                    haptic(nextCountdown);
+                                    pageRates.nextStatus.setText(iconText(R.drawable.ic_sparkles, S("¡Nueva tasa publicada!", "New rate published!"), 13, col("green")));
+                                    nextCountdown.setTextColor(col("green"));
+                                    nextCountdown.setText(S("¡Nueva tasa publicada!", "New rate published!"));
+                                    nextCountdown.setScaleX(1.15f);
+                                    nextCountdown.setScaleY(1.15f);
+                                    nextCountdown.animate().scaleX(1f).scaleY(1f).setDuration(450).setInterpolator(pop).start();
+                                }
                                 SimpleDateFormat f = new SimpleDateFormat("HH:mm", new Locale("es"));
                                 nextStatus.setText(iconText(R.drawable.ic_check_circle, S("El BCV publicó Bs. ", "BCV published Bs. ") + fmt(fRate) + S(" · detectado a las ", " · detected at ") + f.format(new Date()) + S(" (hora del teléfono)", " (phone time)"), 13, col("green")));
                                 dateAct.setEnabled(true);
@@ -2816,7 +2948,12 @@ public class MainActivity extends Activity {
                                 dateAct.setEnabled(true);
                                 dateAct.setAlpha(1f);
                                 if (fErr != null) {
-                                    nextStatus.setText(iconText(R.drawable.ic_wifi_off, S("Sin conexión con el BCV · revisando cada minuto…", "Can't reach the BCV · retrying every minute…"), 13, col("text_secondary")));
+                                    // El mensaje dice QUÉ servicio falló: si el sitio del BCV
+                                    // respondió, el problema fue la API de tasas.
+                                    String msg = fBcvOk
+                                            ? S("No se pudo consultar la API de tasas · reintentando…", "Couldn't reach the rates API · retrying…")
+                                            : S("Sin conexión con el BCV · revisando cada minuto…", "Can't reach the BCV · retrying every minute…");
+                                    nextStatus.setText(iconText(R.drawable.ic_wifi_off, msg, 13, col("text_secondary")));
                                 } else {
                                     int dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
                                     if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) {
@@ -3409,7 +3546,7 @@ public class MainActivity extends Activity {
         private long lastSig = Long.MIN_VALUE;
         private int lastRangeKey = -1;
 
-        private float sX0, sY0, gSpan = -1f, lastUpX, scrubX, cx0;
+        private float sX0, sY0, gSpan = -1f, lastUpX, scrubX, cx0, cxLast;
         private boolean scrub, scrubPass, gOver, pan2;
         // Instante del punto que se está mirando. Se guarda el TIEMPO y no el índice: al mover
         // la ventana (zoom, pan, barra de navegación) el índice queda obsoleto y el acceso
@@ -3515,6 +3652,7 @@ public class MainActivity extends Activity {
                     if (act == MotionEvent.ACTION_POINTER_DOWN) {
                         scrub = false; scrubPass = false; pan2 = true; gSpan = -1f;
                         cx0 = (ev.getX(0) + ev.getX(1)) / 2f;
+                        cxLast = cx0;
                         gPanT0 = startT;
                         if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
                         invalidate();
@@ -3537,8 +3675,14 @@ public class MainActivity extends Activity {
                             scaleDet.onTouchEvent(ev);
                             float cx = (ev.getX(0) + ev.getX(ev.getPointerCount() - 1)) / 2f;
                             if (pan2) {
+                                // El pan es INCREMENTAL (respecto al centro anterior), no
+                                // respecto al inicio del gesto: si se calculara desde gPanT0
+                                // pisaba el ancla que acababa de fijar el pellizco y la
+                                // ventana se iba al borde al hacer zoom.
                                 long span = spanNow();
-                                startT = gPanT0 - (long)((cx - cx0) / Math.max(1f, getWidth() - pl() - pr()) * (float) span);
+                                float uw = Math.max(1f, getWidth() - pl() - pr());
+                                startT = startT - (long) ((cx - cxLast) / uw * (float) span);
+                                cxLast = cx;
                                 clampStart();
                                 windowChanged();
                             }
@@ -4039,10 +4183,16 @@ public class MainActivity extends Activity {
         }
 
         private String fmtAxisDate(long t, long span) {
+            // Hora de Venezuela como en el resto de la app (si la zona del teléfono está mal
+            // puesta, el eje de la gráfica se descuadraba con las fechas de las tarjetas).
             try {
-                if (span <= 36L * 3600000L) return new SimpleDateFormat("HH:mm", new Locale("es", "VE")).format(new Date(t));
-                if (span <= 60L * 86400000L) return new SimpleDateFormat("d MMM", new Locale("es")).format(new Date(t));
-                return new SimpleDateFormat("MMM yy", new Locale("es")).format(new Date(t));
+                TimeZone tz = TimeZone.getTimeZone("America/Caracas");
+                SimpleDateFormat f;
+                if (span <= 36L * 3600000L) f = new SimpleDateFormat("HH:mm", new Locale("es", "VE"));
+                else if (span <= 60L * 86400000L) f = new SimpleDateFormat("d MMM", new Locale("es"));
+                else f = new SimpleDateFormat("MMM yy", new Locale("es"));
+                f.setTimeZone(tz);
+                return f.format(new Date(t));
             } catch (Exception e) {
                 return "";
             }
@@ -4797,6 +4947,37 @@ public class MainActivity extends Activity {
         });
         notifRow.addView(notifSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // Aviso en segundo plano cuando se publica una tasa nueva (vigilancia por hora
+        // entre las 2:00 y las 7:00 PM, hora de Venezuela, solo días hábiles).
+        LinearLayout watchRow = new LinearLayout(this);
+        watchRow.setOrientation(LinearLayout.HORIZONTAL);
+        watchRow.setGravity(Gravity.CENTER_VERTICAL);
+        watchRow.setPadding(0, dp(12), 0, dp(12));
+        themeCard.addView(watchRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout watchCol = new LinearLayout(this);
+        watchCol.setOrientation(LinearLayout.VERTICAL);
+        watchRow.addView(watchCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        watchCol.addView(tv(S("Avisar cuando cambie la tasa", "Alert when the rate changes"), 15, false, col("text_primary")));
+        watchCol.addView(tv(S("Comprueba en segundo plano mientras la app está cerrada", "Checks in the background while the app is closed"), 13, false, col("text_secondary")));
+        Switch watchSwitch = new Switch(this);
+        watchSwitch.setChecked(watchOn);
+        try {
+            watchSwitch.setThumbTintList(android.content.res.ColorStateList.valueOf(col("accent")));
+            int[][] wstates = new int[][]{ new int[]{android.R.attr.state_checked}, new int[]{} };
+            int[] wcolors = new int[]{ col("accent"), col("separator") };
+            watchSwitch.setTrackTintList(new android.content.res.ColorStateList(wstates, wcolors));
+        } catch (Exception ignored) { }
+        watchSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                watchOn = checked;
+                saveAll();
+                if (checked) RateAlarm.scheduleWatch(MainActivity.this);
+                else RateAlarm.cancelWatch(MainActivity.this);
+                Toast.makeText(MainActivity.this, checked ? S("Aviso de cambios activado", "Rate change alert on") : S("Aviso de cambios desactivado", "Rate change alert off"), Toast.LENGTH_SHORT).show();
+            }
+        });
+        watchRow.addView(watchSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         // Vibración al tocar
         LinearLayout hapRow = new LinearLayout(this);
         hapRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -4944,8 +5125,19 @@ public class MainActivity extends Activity {
         // nuevo y hacer crossfade de toda la pantalla.
         try {
             final int keepTab = currentTab;
-            final Bitmap snap = Bitmap.createBitmap(rootF.getWidth(), rootF.getHeight(), Bitmap.Config.ARGB_8888);
-            rootF.draw(new Canvas(snap));
+            final int rw = rootF.getWidth(), rh = rootF.getHeight();
+            if (rw <= 0 || rh <= 0) {
+                buildUi();
+                currentTab = -1;
+                selectTab(keepTab < 0 ? 0 : keepTab);
+                updateAllPages();
+                return;
+            }
+            // Captura a media resolución (a resolución completa eran ~10 MB en el hilo de UI)
+            final Bitmap snap = Bitmap.createBitmap(Math.max(1, rw / 2), Math.max(1, rh / 2), Bitmap.Config.ARGB_8888);
+            Canvas sc = new Canvas(snap);
+            sc.scale(0.5f, 0.5f);
+            rootF.draw(sc);
 
             buildUi();
 
@@ -5255,6 +5447,12 @@ public class MainActivity extends Activity {
                             recordChange(chgUsdt, usdt, tUsdt, 0L);
                             recordChange(chgPar, paralelo, tPar, DEBOUNCE_MS);
                             saveAll();
+                            // Cuándo se obtuvo el dato (lo usa el pie del widget: la fecha de
+                            // publicación es a medianoche y decía "Actualizado hace 15 h").
+                            if (ok) {
+                                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                        .putLong("ts_last", System.currentTimeMillis()).apply();
+                            }
                         }
                         updateAllPages();
                         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
@@ -5657,7 +5855,9 @@ public class MainActivity extends Activity {
     private void checkForUpdates(final boolean manual) {
         SharedPreferences p = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long now = System.currentTimeMillis();
-        if (updBusy || (!manual && now - p.getLong("upd_last", 0) < 600000L)) return;
+        // 1 h: con 10 min se llegaban a 6 peticiones/hora a la API de GitHub (límite de 60/h
+        // sin autenticar) y el usuario nunca veía actualizaciones.
+        if (updBusy || (!manual && now - p.getLong("upd_last", 0) < 3600000L)) return;
         updBusy = true;
         new Thread(new Runnable() {
             public void run() {
@@ -5683,17 +5883,21 @@ public class MainActivity extends Activity {
                                 break;
                             }
                         }
-                        if (url.length() == 0) {   // sin .apk: se usa el primero (comportamiento anterior)
-                            url = assets.getJSONObject(0).optString("browser_download_url", "");
-                            size = assets.getJSONObject(0).optLong("size", 0);
-                        }
+                        // Sin un asset .apk no hay nada que instalar: no se ofrece la
+                        // descarga (antes se bajaba el primer asset, que podía ser un
+                        // checksum y fallaba al instalar).
                     }
-                    fetchOk = true;
+                    // Si la respuesta no trae tag, no se comprobó nada: no se marca como
+                    // "ya tienes la última versión".
+                    fetchOk = tag.length() > 0;
                 } catch (Exception ignored) { }
                 final String fTag = tag, fUrl = url, fNotes = notes;
                 final long fSize = size;
                 final boolean fOk = fetchOk;
-                final boolean isNew = fTag.length() > 0 && isNewerVersion(fTag, currentVersionName());
+                // Sin URL de descarga no se anuncia nada (si no, "Nueva versión disponible"
+                // llevaba a un diálogo sin nada que bajar).
+                final boolean isNew = fTag.length() > 0 && fUrl.length() > 0
+                        && isNewerVersion(fTag, currentVersionName());
                 ui.post(new Runnable() {
                     public void run() {
                         updBusy = false;
@@ -6207,8 +6411,15 @@ public class MainActivity extends Activity {
     private String fmtDay(long t) {
         try {
             long dias = (System.currentTimeMillis() - t) / 86400000L;
-            if (dias <= 2) return new SimpleDateFormat("d MMM HH:mm", new Locale("es", "VE")).format(new Date(t));
-            return new SimpleDateFormat("d MMM", new Locale("es")).format(new Date(t));
+            TimeZone tz = TimeZone.getTimeZone("America/Caracas");
+            if (dias <= 2) {
+                SimpleDateFormat f = new SimpleDateFormat("d MMM HH:mm", new Locale("es", "VE"));
+                f.setTimeZone(tz);
+                return f.format(new Date(t));
+            }
+            SimpleDateFormat f = new SimpleDateFormat("d MMM", new Locale("es"));
+            f.setTimeZone(tz);
+            return f.format(new Date(t));
         } catch (Exception e) {
             return "";
         }

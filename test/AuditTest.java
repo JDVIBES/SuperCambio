@@ -1,6 +1,7 @@
 /*
  * Pruebas de la lógica crítica (fechas ISO con offset, vaivenes, fusión del historial
- * compartido, búsqueda de bancos y monto del conversor). Corre contra el CÓDIGO REAL.
+ * compartido, búsqueda de bancos, monto del conversor y turnos de vigilancia).
+ * Corre contra el CÓDIGO REAL.
  *
  * Cómo ejecutarlas (Termux):
  *   cd ~/re/supercambio
@@ -176,6 +177,21 @@ public class AuditTest {
         check(parse.invoke(act, "0,5").equals(Double.valueOf(0.5)), "parseAmount(0,5) = " + parse.invoke(act, "0,5"));
         check(parse.invoke(act, "").equals(Double.valueOf(0.0)), "parseAmount(vacío) = 0");
         check(parse.invoke(act, "abc").equals(Double.valueOf(0.0)), "parseAmount(abc) = 0");
+
+        // ---------- 6. Vigilancia de la tasa nueva (RateAlarm) ----------
+        Class<?> ra = Class.forName("com.supercambio.app.RateAlarm");
+        Method nws = ra.getDeclaredMethod("nextWatchSlot");
+        nws.setAccessible(true);
+        long slot = ((Long) nws.invoke(null)).longValue();
+        long now2 = System.currentTimeMillis();
+        check(slot > now2, "el próximo turno de vigilancia es futuro: "
+                + new java.text.SimpleDateFormat("d MMM HH:mm").format(new java.util.Date(slot)));
+        java.util.Calendar cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("America/Caracas"));
+        cal.setTimeInMillis(slot);
+        int hh = cal.get(java.util.Calendar.HOUR_OF_DAY);
+        int dow = cal.get(java.util.Calendar.DAY_OF_WEEK);
+        check(hh >= 14 && hh <= 19, "el turno cae entre las 2:00 y las 7:00 PM VET: " + hh);
+        check(dow != java.util.Calendar.SATURDAY && dow != java.util.Calendar.SUNDAY, "el turno cae en día hábil");
 
         System.out.println(fails == 0 ? "ALL TESTS PASSED" : (fails + " TEST(S) FAILED"));
         if (fails > 0) System.exit(1);

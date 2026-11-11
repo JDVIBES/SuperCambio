@@ -25,8 +25,16 @@ public class RateWidget extends AppWidgetProvider {
             double eur = Double.longBitsToDouble(p.getLong("eur", 0));
             double par = Double.longBitsToDouble(p.getLong("par", 0));
             double usdt = Double.longBitsToDouble(p.getLong("usdt", 0));
+            // tsUsd es la FECHA DE PUBLICACIÓN de la tasa (medianoche de Caracas del día
+            // en que se publicó), así que no servía para el pie: decía "Actualizado hace
+            // 15 h" con la tasa recién publicada. ts_last es cuándo se obtuvo el dato.
             long ts = p.getLong("tsUsd", 0);
-            String t = rel(ts);
+            long last = p.getLong("ts_last", 0);
+            String t = rel(last > 0 ? last : ts);
+            double prevUsd = Double.longBitsToDouble(p.getLong("prevUsd", 0));
+            String varUsd = variation(prevUsd, usd);
+            String foot = (last > 0 || ts > 0) ? "Actualizado " + t : "Actualizado: —";
+            if (varUsd.length() > 0) foot = foot + " · " + varUsd;
 
             AppWidgetManager awm = AppWidgetManager.getInstance(ctx);
             Intent it = new Intent(ctx, MainActivity.class);
@@ -42,7 +50,7 @@ public class RateWidget extends AppWidgetProvider {
             rv.setTextViewText(R.id.w_usd, usd > 0 ? f(usd) : "—");
             rv.setTextViewText(R.id.w_par, par > 0 ? f(par) : "—");
             rv.setTextViewText(R.id.w_eur, eur > 0 ? f(eur) : "—");
-            rv.setTextViewText(R.id.w_time, ts > 0 ? "Actualizado " + t : "Actualizado: —");
+            rv.setTextViewText(R.id.w_time, foot);
             rv.setOnClickPendingIntent(R.id.widget_root, pi);
             awm.updateAppWidget(new ComponentName(ctx, RateWidget.class), rv);
 
@@ -50,7 +58,7 @@ public class RateWidget extends AppWidgetProvider {
             RemoteViews sv = new RemoteViews(ctx.getPackageName(), R.layout.widget_single);
             sv.setInt(R.id.ws_root, "setBackgroundResource", bg);
             sv.setTextViewText(R.id.ws_val, usd > 0 ? f(usd) : "—");
-            sv.setTextViewText(R.id.ws_time, t);
+            sv.setTextViewText(R.id.ws_time, varUsd.length() > 0 ? varUsd : t);
             sv.setOnClickPendingIntent(R.id.ws_root, pi);
             awm.updateAppWidget(new ComponentName(ctx, WidgetSingle.class), sv);
 
@@ -59,7 +67,7 @@ public class RateWidget extends AppWidgetProvider {
             mv.setInt(R.id.wm_root, "setBackgroundResource", bg);
             mv.setTextViewText(R.id.wm_usd, usd > 0 ? f(usd) : "—");
             mv.setTextViewText(R.id.wm_par, par > 0 ? f(par) : "—");
-            mv.setTextViewText(R.id.wm_time, ts > 0 ? "Actualizado " + t : "Actualizado: —");
+            mv.setTextViewText(R.id.wm_time, foot);
             mv.setOnClickPendingIntent(R.id.wm_root, pi);
             awm.updateAppWidget(new ComponentName(ctx, WidgetSmall.class), mv);
 
@@ -70,7 +78,7 @@ public class RateWidget extends AppWidgetProvider {
             lv.setTextViewText(R.id.wl_par, par > 0 ? f(par) : "—");
             lv.setTextViewText(R.id.wl_usdt, usdt > 0 ? f(usdt) : "—");
             lv.setTextViewText(R.id.wl_eur, eur > 0 ? f(eur) : "—");
-            lv.setTextViewText(R.id.wl_time, ts > 0 ? "Actualizado " + t : "Actualizado: —");
+            lv.setTextViewText(R.id.wl_time, foot);
             lv.setOnClickPendingIntent(R.id.wl_root, pi);
             awm.updateAppWidget(new ComponentName(ctx, WidgetLarge.class), lv);
         } catch (Exception ignored) { }
@@ -78,6 +86,14 @@ public class RateWidget extends AppWidgetProvider {
 
     private static String f(double v) {
         return String.format(new Locale("es", "VE"), "%,.2f", v);
+    }
+
+    // Variación respecto a la tasa anterior: "▲ 1,2 %" / "▼ 0,4 %" (vacío si no hay dato)
+    private static String variation(double prev, double v) {
+        if (prev <= 0 || v <= 0) return "";
+        double pct = (v - prev) / prev * 100.0;
+        if (Math.abs(pct) < 0.0001) return "";
+        return (pct > 0 ? "▲ " : "▼ ") + String.format(new Locale("es", "VE"), "%.1f %%", Math.abs(pct));
     }
 
     // Tiempo relativo compacto para el pie del widget

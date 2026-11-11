@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.supercambio.app"
-    android:versionCode="73"
-    android:versionName="3.0.18">
+    android:versionCode="74"
+    android:versionName="3.5.0">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="28"/>
 
@@ -75,6 +75,10 @@
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <!-- Tras instalar una actualización las alarmas del paquete se pierden: sin
+                     esto el aviso diario quedaba sin agendar hasta abrir la app a mano. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
         <provider

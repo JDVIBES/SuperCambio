@@ -27,22 +27,95 @@ import java.util.TimeZone;
 public class RateAlarm extends BroadcastReceiver {
 
     static final String CH = "tasas_diarias";
+    // Modo "vigilancia": comprueba cada media hora si el BCV publicó una tasa nueva y
+    // avisa solo si cambió (el aviso diario es el resumen de las 3:35 PM).
+    static final String EXTRA_WATCH = "watch";
 
     public void onReceive(final Context ctx, Intent i) {
+        final boolean watch = i != null && i.getBooleanExtra(EXTRA_WATCH, false);
         final PendingResult pr = goAsync();
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    fetchLatest(ctx);
-                    push(ctx);
-                    // La alarma es exacta y no se repite sola: se rearma para el día siguiente.
-                    schedule(ctx, true);
+                    if (watch) {
+                        // El rearme va PRIMERO: la red puede pasar del presupuesto del
+                        // broadcast (~10 s) y el sistema mata el proceso; si el rearme estaba
+                        // después, la alarma exacta (one-shot) se perdía para el día siguiente.
+                        scheduleWatch(ctx);
+                        boolean changed = fetchLatest(ctx);
+                        RateWidget.push(ctx);          // el widget se actualiza siempre
+                        if (changed) push(ctx);        // el aviso solo si la tasa cambió
+                    } else {
+                        // El rearme va PRIMERO: la red puede pasar del presupuesto del
+                        // broadcast (~10 s) y el sistema mata el proceso; si el rearme estaba
+                        // después, la alarma exacta (one-shot) se perdía para el día siguiente.
+                        schedule(ctx, true);
+                        fetchLatest(ctx);
+                        push(ctx);
+                    }
                 } finally {
                     // finish() SIEMPRE: si no, el sistema mata la app por timeout del broadcast.
                     if (pr != null) pr.finish();
                 }
             }
         }).start();
+    }
+
+    // ===== VIGILANCIA: avisar cuando se publica una tasa nueva =====
+    // Turnos cada hora (de 2:00 a 7:00 PM, hora de Venezuela) solo de lunes a viernes:
+    // es la ventana en la que el BCV publica. Así el aviso llega como máximo una hora
+    // después de la publicación, aunque la app esté cerrada.
+    static void scheduleWatch(Context ctx) {
+        try {
+            AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+            if (am == null) return;
+            Intent it = new Intent(ctx, RateAlarm.class);
+            it.putExtra(EXTRA_WATCH, true);
+            PendingIntent pi = PendingIntent.getBroadcast(ctx, 1002, it, 0x0C000000);
+            long next = nextWatchSlot();
+            if (next <= 0) { am.cancel(pi); return; }
+            if (Build.VERSION.SDK_INT >= 23) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi);
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, next, pi);
+            }
+        } catch (Exception ignored) { }
+    }
+
+    static void cancelWatch(Context ctx) {
+        try {
+            AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+            if (am == null) return;
+            Intent it = new Intent(ctx, RateAlarm.class);
+            it.putExtra(EXTRA_WATCH, true);
+            PendingIntent pi = PendingIntent.getBroadcast(ctx, 1002, it, 0x0C000000);
+            am.cancel(pi);
+        } catch (Exception ignored) { }
+    }
+
+    private static long nextWatchSlot() {
+        try {
+            TimeZone tz = TimeZone.getTimeZone("America/Caracas");
+            long now = System.currentTimeMillis();
+            Calendar cal = Calendar.getInstance(tz);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            for (int day = 0; day < 8; day++) {
+                for (int h = 14; h <= 19; h++) {
+                    cal.set(Calendar.HOUR_OF_DAY, h);
+                    long t = cal.getTimeInMillis();
+                    if (t <= now) continue;
+                    int dow = cal.get(Calendar.DAY_OF_WEEK);
+                    if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) break;  // hoy es fin de semana
+                    return t;
+                }
+                cal.add(Calendar.DAY_OF_MONTH, 1);
+            }
+            return 0;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     static void schedule(Context ctx, boolean enable) {
@@ -96,7 +169,9 @@ public class RateAlarm extends BroadcastReceiver {
             double usd = Double.longBitsToDouble(p.getLong("usd", 0));
             double par = Double.longBitsToDouble(p.getLong("par", 0));
 
-            String hora = new SimpleDateFormat("HH:mm", new Locale("es", "VE")).format(new Date());
+            SimpleDateFormat hf = new SimpleDateFormat("HH:mm", new Locale("es", "VE"));
+            hf.setTimeZone(TimeZone.getTimeZone("America/Caracas"));   // la hora es la de Venezuela
+            String hora = hf.format(new Date());
             StringBuilder txt = new StringBuilder();
             if (usd > 0) txt.append("BCV: Bs. ").append(f(usd));
             if (par > 0) {
@@ -131,7 +206,9 @@ public class RateAlarm extends BroadcastReceiver {
         RateWidget.push(ctx);
     }
 
-    private static void fetchLatest(Context ctx) {
+    // Devuelve true si la tasa oficial cambió (para avisar solo cuando hay novedad)
+    private static boolean fetchLatest(Context ctx) {
+        boolean changed = false;
         SharedPreferences p = ctx.getSharedPreferences("supercambio", Context.MODE_PRIVATE);
         SharedPreferences.Editor e = p.edit();
         try {
@@ -148,6 +225,8 @@ public class RateAlarm extends BroadcastReceiver {
                     // Solo si es MÁS NUEVO que lo guardado: una réplica vieja del API no
                     // puede pisar la tasa que el usuario ya tenía.
                     if (t > 0 && t <= p.getLong("tsUsd", 0)) continue;
+                    double old = Double.longBitsToDouble(p.getLong("usd", 0));
+                    if (old > 0 && Math.abs(old - v) > 0.00001) changed = true;
                     e.putLong("usd", Double.doubleToRawLongBits(v));
                     if (t > 0) e.putLong("tsUsd", t);
                 } else if ("paralelo".equals(fu)) {
@@ -186,8 +265,10 @@ public class RateAlarm extends BroadcastReceiver {
         } catch (Exception ignored) { }
         try {
             // Aunque un bloque falle, se guarda lo que sí se pudo leer.
+            e.putLong("ts_last", System.currentTimeMillis());   // cuándo se obtuvo el dato
             e.apply();
         } catch (Exception ignored) { }
+        return changed;
     }
 
     private static String httpGetS(String urlStr) throws Exception {
