@@ -99,10 +99,24 @@ public class MainActivity extends Activity {
     private static final String SYNC_WRITE = "https://textdb.online/update";
     private boolean syncBusy = false;
     private long lastSyncTry = 0;
+    private boolean lastSyncOk = true;
+    private long lastSyncAt = 0;
     private static final String API_USD = "https://ve.dolarapi.com/v1/dolares";
     private static final String API_EUR = "https://ve.dolarapi.com/v1/euros";
     private static final String API_USDT = "https://criptoya.com/api/USDT/VES/1";
-    private static final int MAX_POINTS = 500;
+    private static final int MAX_CHANGES = 250;   // serie de cambios (gráfica + nube)
+    private static final int MAX_TRAIL = 120;     // rastro local de observaciones
+    private static final int SYNC_MAX_BODY = 12000; // límite del cuerpo POST (bytes codificados)
+    // Reparto del presupuesto de puntos por serie en la nube: el dólar oficial cambia 1 vez al
+    // día (aguanta meses), el USDT cambia cada pocos minutos (gusta menos su historial).
+    private static final int SYNC_MAX_USD = 90;
+    private static final int SYNC_MAX_EUR = 60;
+    private static final int SYNC_MAX_USDT = 70;
+    private static final int SYNC_MAX_PAR = 60;
+    private static final long SYNC_THROTTLE = 900000L;   // 15 min entre sincronizaciones
+    private static final long SYNC_RETRY = 60000L;       // 1 min tras un fallo
+    private static final long CLOCK_SKEW_MAX = 6 * 3600000L; // 6 h por delante se considera error
+    private static final long MIN_TS = 1420070400000L;   // 2015-01-01: puntos más viejos se descartan
 
     private Handler ui;
     private Runnable nextTick;
@@ -133,7 +147,8 @@ public class MainActivity extends Activity {
     private double prevUsd, prevEur, prevUsdt, prevPar;
     private long tUsd, tEur, tUsdt, tPar;
 
-    private JSONArray histUsd, histEur, histUsdt, histPar;
+    private JSONArray histUsd, histEur, histUsdt, histPar;   // rastro local de observaciones
+    private JSONArray chgUsd, chgEur, chgUsdt, chgPar;        // serie de cambios (local + nube)
 
     private FrameLayout pager;
     private FrameLayout rootF;
@@ -564,13 +579,35 @@ public class MainActivity extends Activity {
             histUsdt = new JSONArray();
             histPar = new JSONArray();
         }
-        // El historial antes guardaba un punto por cada apertura de la app (incluso sin cambio
-        // de tasa). Eso llenaba la serie de repetidos, inflaba el contador de puntos y dejaba la
-        // "Variación" de Gráficas siempre en 0,0 %. Se colapsa una sola vez al cargar.
-        histUsd = dedupeHist(histUsd);
-        histEur = dedupeHist(histEur);
-        histUsdt = dedupeHist(histUsdt);
-        histPar = dedupeHist(histPar);
+        // Capa 2: SERIE DE CAMBIOS (un punto por cada vez que la tasa cambió). Es la que usan
+        // la gráfica, las estadísticas, el CSV y el historial compartido. El "rastro" (capa 1)
+        // conserva una observación por cada apertura de la app y no se toca al sincronizar.
+        boolean hadChg = p.contains("chg_usd") || p.contains("chg_eur")
+                || p.contains("chg_usdt") || p.contains("chg_par");
+        try {
+            chgUsd = new JSONArray(p.getString("chg_usd", "[]"));
+            chgEur = new JSONArray(p.getString("chg_eur", "[]"));
+            chgUsdt = new JSONArray(p.getString("chg_usdt", "[]"));
+            chgPar = new JSONArray(p.getString("chg_par", "[]"));
+        } catch (Exception e) {
+            chgUsd = new JSONArray();
+            chgEur = new JSONArray();
+            chgUsdt = new JSONArray();
+            chgPar = new JSONArray();
+        }
+        if (!hadChg) {
+            // Migración: la serie de cambios se deriva del rastro existente, sin perder datos.
+            chgUsd = collapseTrail(histUsd);
+            chgEur = collapseTrail(histEur);
+            chgUsdt = collapseTrail(histUsdt);
+            chgPar = collapseTrail(histPar);
+        }
+        // Si no hay serie de cambios pero hay tasa en caché, se siembra con su fecha de
+        // publicación para que la gráfica nunca arranque vacía.
+        if (chgUsd.length() == 0 && bcvUsd > 0) recordChange(chgUsd, bcvUsd, tUsd);
+        if (chgEur.length() == 0 && bcvEur > 0) recordChange(chgEur, bcvEur, tEur);
+        if (chgUsdt.length() == 0 && usdt > 0) recordChange(chgUsdt, usdt, tUsdt);
+        if (chgPar.length() == 0 && paralelo > 0) recordChange(chgPar, paralelo, tPar);
     }
 
     private void saveAll() {
@@ -601,57 +638,75 @@ public class MainActivity extends Activity {
             e.putString("hist_eur", histEur.toString());
             e.putString("hist_usdt", histUsdt.toString());
             e.putString("hist_par", histPar.toString());
+            e.putString("chg_usd", chgUsd.toString());
+            e.putString("chg_eur", chgEur.toString());
+            e.putString("chg_usdt", chgUsdt.toString());
+            e.putString("chg_par", chgPar.toString());
         } catch (Exception ignored) { }
         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
         e.putString("ts", f.format(new Date()));
         e.apply();
     }
 
+    // ===== HISTORIAL: dos capas =====
+    // Capa 1 (RASTRO): una observación por cada apertura de la app, con duplicados. Solo local.
+    // Capa 2 (CAMBIOS): un punto por cada vez que la tasa cambió, fechado con el timestamp de
+    // publicación de la tasa. Es la que usan gráfica, estadísticas, CSV y el historial compartido.
+
     private void appendHist(JSONArray arr, double v, long t) {
         try {
-            // Si la tasa no cambió no se guarda un punto nuevo: solo se actualiza la marca de
-            // tiempo del último, para que la serie siga siendo "puntos de cambio" y la gráfica
-            // llegue hasta la observación más reciente.
+            JSONObject o = new JSONObject();
+            o.put("t", t);
+            o.put("v", v);
+            arr.put(o);
+            while (arr.length() > MAX_TRAIL) arr.remove(0);
+        } catch (Exception ignored) { }
+    }
+
+    // Colapsa el rastro: deja un punto por cada racha de valores iguales (el momento en que se
+    // detectó el cambio). Se usa para migrar el rastro viejo a la serie de cambios.
+    private JSONArray collapseTrail(JSONArray src) {
+        JSONArray out = new JSONArray();
+        if (src == null) return out;
+        try {
+            for (int i = 0; i < src.length(); i++) {
+                JSONObject o = src.getJSONObject(i);
+                double v = o.getDouble("v");
+                if (out.length() > 0) {
+                    JSONObject prev = out.getJSONObject(out.length() - 1);
+                    if (Math.abs(prev.getDouble("v") - v) < 1e-9) continue;
+                }
+                JSONObject np = new JSONObject();
+                np.put("t", o.getLong("t"));
+                np.put("v", v);
+                out.put(np);
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    // Registra un CAMBIO de tasa en la serie de cambios.
+    // tPub es el timestamp de publicación de la tasa (el mismo para todos los dispositivos);
+    // si no existe o es anterior al último punto, se usa la hora actual.
+    private void recordChange(JSONArray arr, double v, long tPub) {
+        if (arr == null || v <= 0) return;
+        try {
+            long now = System.currentTimeMillis();
+            long t = (tPub > 0) ? tPub : now;
             if (arr.length() > 0) {
                 JSONObject last = arr.getJSONObject(arr.length() - 1);
-                if (Math.abs(last.getDouble("v") - v) < 1e-9) {
-                    if (t > last.getLong("t")) last.put("t", t);
-                    return;
-                }
+                long lt = last.getLong("t");
+                double lv = last.getDouble("v");
+                if (Math.abs(lv - v) < 1e-9) return;              // no cambió: no es un cambio
+                if (t <= lt) t = now;                              // evita desordenar la serie
+                if (t == lt) { last.put("v", v); return; }         // mismo instante: actualiza
             }
             JSONObject o = new JSONObject();
             o.put("t", t);
             o.put("v", v);
             arr.put(o);
-            while (arr.length() > MAX_POINTS) arr.remove(0);
+            while (arr.length() > MAX_CHANGES) arr.remove(0);
         } catch (Exception ignored) { }
-    }
-
-    // Colapsa rachas de valores iguales: conserva el primer timestamp de cada racha (el momento
-    // del cambio) y deja el último punto con la marca de tiempo más reciente de la serie.
-    private JSONArray dedupeHist(JSONArray src) {
-        JSONArray out = new JSONArray();
-        if (src == null) return out;
-        try {
-            long lastT = 0;
-            for (int i = 0; i < src.length(); i++) {
-                JSONObject o = src.getJSONObject(i);
-                long t = o.getLong("t");
-                if (t > lastT) lastT = t;
-                if (out.length() > 0) {
-                    JSONObject prev = out.getJSONObject(out.length() - 1);
-                    if (Math.abs(prev.getDouble("v") - o.getDouble("v")) < 1e-9) continue;
-                }
-                JSONObject np = new JSONObject();
-                np.put("t", t);
-                np.put("v", o.getDouble("v"));
-                out.put(np);
-            }
-            if (out.length() > 0 && lastT > 0) {
-                out.getJSONObject(out.length() - 1).put("t", lastT);
-            }
-        } catch (Exception ignored) { }
-        return out;
     }
 
     private void seedHistIfEmpty(JSONArray arr, double v, long t) {
@@ -1383,10 +1438,10 @@ public class MainActivity extends Activity {
         try {
             StringBuilder sb = new StringBuilder();
             sb.append("tasa,fecha,valor_bs\n");
-            appendCsv(sb, S("Dólar BCV", "BCV Dollar"), histUsd);
-            appendCsv(sb, S("Dólar paralelo", "Parallel dollar"), histPar);
-            appendCsv(sb, S("Euro BCV", "BCV Euro"), histEur);
-            appendCsv(sb, "USDT", histUsdt);
+            appendCsv(sb, S("Dólar BCV", "BCV Dollar"), chgUsd);
+            appendCsv(sb, S("Dólar paralelo", "Parallel dollar"), chgPar);
+            appendCsv(sb, S("Euro BCV", "BCV Euro"), chgEur);
+            appendCsv(sb, "USDT", chgUsdt);
             os = getContentResolver().openOutputStream(uri);
             if (os == null) throw new Exception("stream");
             os.write(sb.toString().getBytes("UTF-8"));
@@ -2577,6 +2632,7 @@ public class MainActivity extends Activity {
                                 tUsd = fTs;
                                 seedHistIfEmpty(histUsd, bcvUsd, tUsd);
                                 appendHist(histUsd, bcvUsd, System.currentTimeMillis());
+                                recordChange(chgUsd, bcvUsd, tUsd);
                                 saveAll();
                                 updateAllPages();
                                 celebrateUntil = System.currentTimeMillis() + 10000;
@@ -2764,10 +2820,10 @@ public class MainActivity extends Activity {
         }
 
         private JSONArray histSel() {
-            if (sel == 0) return histUsd;
-            if (sel == 1) return histEur;
-            if (sel == 2) return histUsdt;
-            return histPar;
+            if (sel == 0) return chgUsd;
+            if (sel == 1) return chgEur;
+            if (sel == 2) return chgUsdt;
+            return chgPar;
         }
 
         private void redraw() {
@@ -4347,14 +4403,22 @@ public class MainActivity extends Activity {
                             tPar = fTsPar > 0 ? fTsPar : tPar;
                         }
                         if (ok) {
+                            long nowMs = System.currentTimeMillis();
+                            // Rastro local: una observación por cada apertura (con duplicados).
                             seedHistIfEmpty(histUsd, bcvUsd, tUsd);
                             seedHistIfEmpty(histEur, bcvEur, tEur);
                             seedHistIfEmpty(histUsdt, usdt, tUsdt);
                             seedHistIfEmpty(histPar, paralelo, tPar);
-                            appendHist(histUsd, bcvUsd, System.currentTimeMillis());
-                            appendHist(histEur, bcvEur, System.currentTimeMillis());
-                            appendHist(histUsdt, usdt, System.currentTimeMillis());
-                            appendHist(histPar, paralelo, System.currentTimeMillis());
+                            appendHist(histUsd, bcvUsd, nowMs);
+                            appendHist(histEur, bcvEur, nowMs);
+                            appendHist(histUsdt, usdt, nowMs);
+                            appendHist(histPar, paralelo, nowMs);
+                            // Serie de cambios: un punto por cambio, fechado con el timestamp de
+                            // publicación de la tasa (así todos los usuarios marcan el mismo instante).
+                            recordChange(chgUsd, bcvUsd, tUsd);
+                            recordChange(chgEur, bcvEur, tEur);
+                            recordChange(chgUsdt, usdt, tUsdt);
+                            recordChange(chgPar, paralelo, tPar);
                             saveAll();
                         }
                         updateAllPages();
@@ -4833,152 +4897,221 @@ public class MainActivity extends Activity {
     }
 
     // ===== Historial compartido entre usuarios =====
-    // Solo se comparten los puntos donde la tasa VARÍA (cambia de valor).
+    // Solo se comparten los puntos donde la tasa VARÍA (cambia de valor), fechados con el
+    // timestamp de publicación de la tasa (así todos los dispositivos marcan el mismo instante).
     // Nube pública: textdb.online · sin cuentas · sin datos personales.
+    //
+    // Correcciones aplicadas en 3.0.11 (bugs de lógica del historial compartido):
+    //  1) Se sube SIEMPRE la serie FUSIONADA (nube + cambios locales), nunca la local sola:
+    //     antes, una instalación nueva o una lectura inválida borraban el historial compartido.
+    //  2) Fail-safe: si la lectura falla o devuelve algo inválido, NO se escribe nada.
+    //  3) Tope de tamaño: el cuerpo POST no puede pasar de SYNC_MAX_BODY; si no cabe, se
+    //     recortan los puntos más antiguos de cada serie hasta que quepa.
+    //  4) Se validan los códigos HTTP: una escritura fallida se reintenta en 1 min.
+    //  5) Guardia de reloj: se descartan puntos con fecha futura (+6 h) o anterior a 2015.
 
     private void syncSharedHist(boolean force) {
         long now = System.currentTimeMillis();
-        if (syncBusy || (!force && now - lastSyncTry < 900000L)) return;
+        if (syncBusy) return;
+        long wait = lastSyncOk ? SYNC_THROTTLE : SYNC_RETRY;
+        if (!force && now - lastSyncTry < wait) return;
         syncBusy = true;
         lastSyncTry = now;
         new Thread(new Runnable() {
             public void run() {
+                boolean ok = false;
                 try {
                     String raw = httpGet(SYNC_READ);
-                    JSONObject remote = null;
-                    try { remote = new JSONObject(raw); } catch (Exception e) { remote = new JSONObject(); }
-                    // Fusionar SIN mutar los arrays vivos (los aplica la UI)
-                    final JSONArray mUsd = mergeHist(remote.optJSONArray("usd"), histUsd);
-                    final JSONArray mEur = mergeHist(remote.optJSONArray("eur"), histEur);
-                    final JSONArray mUsdt = mergeHist(remote.optJSONArray("usdt"), histUsdt);
-                    final JSONArray mPar = mergeHist(remote.optJSONArray("par"), histPar);
-                    boolean changed = mUsd != null | mEur != null | mUsdt != null | mPar != null;
-                    boolean upload = localNewPoints(remote.optJSONArray("usd"), histUsd)
-                            || localNewPoints(remote.optJSONArray("eur"), histEur)
-                            || localNewPoints(remote.optJSONArray("usdt"), histUsdt)
-                            || localNewPoints(remote.optJSONArray("par"), histPar);
+                    JSONObject remote = new JSONObject();
+                    if (raw != null && raw.trim().length() > 0) {
+                        try {
+                            remote = new JSONObject(raw);
+                        } catch (Exception e) {
+                            return;   // respuesta inválida: fail-safe, no se escribe nada
+                        }
+                    }
+                    final JSONArray rUsd = remote.optJSONArray("usd");
+                    final JSONArray rEur = remote.optJSONArray("eur");
+                    final JSONArray rUsdt = remote.optJSONArray("usdt");
+                    final JSONArray rPar = remote.optJSONArray("par");
+
+                    // Fusión por timestamp (NO muta los arrays vivos; los aplica la UI).
+                    final JSONArray mUsd = mergeChanges(rUsd, chgUsd);
+                    final JSONArray mEur = mergeChanges(rEur, chgEur);
+                    final JSONArray mUsdt = mergeChanges(rUsdt, chgUsdt);
+                    final JSONArray mPar = mergeChanges(rPar, chgPar);
+                    final boolean changed = mUsd != null || mEur != null || mUsdt != null || mPar != null;
+                    final boolean localNew = hasNewLocal(rUsd, chgUsd) || hasNewLocal(rEur, chgEur)
+                            || hasNewLocal(rUsdt, chgUsdt) || hasNewLocal(rPar, chgPar);
+
                     if (changed) {
                         ui.post(new Runnable() {
                             public void run() {
-                                if (mUsd != null) histUsd = mUsd;
-                                if (mEur != null) histEur = mEur;
-                                if (mUsdt != null) histUsdt = mUsdt;
-                                if (mPar != null) histPar = mPar;
+                                if (mUsd != null) chgUsd = mUsd;
+                                if (mEur != null) chgEur = mEur;
+                                if (mUsdt != null) chgUsdt = mUsdt;
+                                if (mPar != null) chgPar = mPar;
                                 saveAll();
                                 if (currentTab == 1 && pageCharts != null) pageCharts.redraw();
-                                RateWidget.push(MainActivity.this);
                             }
                         });
                     }
-                    if (upload) {
-                        JSONObject out = new JSONObject();
-                        out.put("usd", variationHist(histUsd));
-                        out.put("eur", variationHist(histEur));
-                        out.put("usdt", variationHist(histUsdt));
-                        out.put("par", variationHist(histPar));
-                        String body = "key=" + SYNC_KEY + "&value=" + java.net.URLEncoder.encode(out.toString(), "UTF-8");
-                        httpFormPost(SYNC_WRITE, body);
+
+                    if (changed || localNew) {
+                        // Se sube la serie FUSIONADA: lo que ya hay en la nube + lo local.
+                        JSONArray uUsd = (mUsd != null) ? mUsd : chgUsd;
+                        JSONArray uEur = (mEur != null) ? mEur : chgEur;
+                        JSONArray uUsdt = (mUsdt != null) ? mUsdt : chgUsdt;
+                        JSONArray uPar = (mPar != null) ? mPar : chgPar;
+                        int limUsd = SYNC_MAX_USD, limEur = SYNC_MAX_EUR;
+                        int limUsdt = SYNC_MAX_USDT, limPar = SYNC_MAX_PAR;
+                        String body = "";
+                        while (true) {
+                            JSONObject out = buildSyncPayload(trimTail(uUsd, limUsd), trimTail(uEur, limEur),
+                                    trimTail(uUsdt, limUsdt), trimTail(uPar, limPar));
+                            body = "key=" + SYNC_KEY + "&value=" + java.net.URLEncoder.encode(out.toString(), "UTF-8");
+                            if (body.length() <= SYNC_MAX_BODY) break;
+                            // Si no cabe, se recortan los puntos más antiguos de cada serie.
+                            limUsd = limUsd / 2; limEur = limEur / 2;
+                            limUsdt = limUsdt / 2; limPar = limPar / 2;
+                            if (limUsd < 8 && limEur < 8 && limUsdt < 8 && limPar < 8) break;
+                        }
+                        int code = httpFormPost(SYNC_WRITE, body);
+                        ok = (code >= 200 && code < 300);
+                    } else {
+                        ok = true;
                     }
                 } catch (Exception ignored) { }
-                syncBusy = false;
+                finally {
+                    lastSyncOk = ok;
+                    if (ok) lastSyncAt = System.currentTimeMillis();
+                    syncBusy = false;
+                }
             }
         }).start();
     }
 
-    // Devuelve el array fusionado (local gana conflictos; remoto añade puntos nuevos)
-    // o null si no hay cambios — NO muta el array local.
-    private JSONArray mergeHist(JSONArray remote, JSONArray local) {
-        if (remote == null || local == null) return null;
-        JSONArray res = null;
-        try {
-            java.util.TreeMap<Long, Double> map = new java.util.TreeMap<Long, Double>();
-            for (int i = 0; i < local.length(); i++) {
-                JSONObject o = local.getJSONObject(i);
-                map.put(o.getLong("t"), o.getDouble("v"));
-            }
-            boolean added = false;
-            for (int i = 0; i < remote.length(); i++) {
-                JSONObject o = remote.getJSONObject(i);
-                long t = o.getLong("t");
-                double v = o.getDouble("v");
-                if (v > 0 && !map.containsKey(t)) {
-                    map.put(t, v);
-                    added = true;
-                }
-            }
-            if (added) {
-                int n = map.size();
-                int skip = Math.max(0, n - 500);
-                JSONArray arr = new JSONArray();
-                int idx = 0;
-                for (java.util.Map.Entry<Long, Double> en : map.entrySet()) {
-                    if (idx++ < skip) continue;
-                    JSONObject np = new JSONObject();
-                    np.put("t", en.getKey());
-                    np.put("v", en.getValue().doubleValue());
-                    arr.put(np);
-                }
-                res = arr;
-            }
-        } catch (Exception ignored) { }
-        return res;
+    // Timestamp válido: ni en el futuro (reloj del dispositivo desincronizado) ni anterior a 2015.
+    private boolean validTs(long t) {
+        if (t < MIN_TS) return false;
+        return t <= System.currentTimeMillis() + CLOCK_SKEW_MAX;
     }
 
-    private boolean localNewPoints(JSONArray remote, JSONArray local) {
+    // Fusiona la serie remota con la local por timestamp. NO muta los arrays vivos.
+    // Devuelve null si la nube no aportó nada nuevo y la local ya estaba limpia.
+    private JSONArray mergeChanges(JSONArray remote, JSONArray local) {
+        if (local == null) return null;
         try {
-            if (local == null || local.length() == 0) return false;
-            if (remote == null || remote.length() == 0) return true;
-            java.util.HashSet<Long> seen = new java.util.HashSet<Long>();
-            for (int i = 0; i < remote.length(); i++) seen.add(remote.getJSONObject(i).getLong("t"));
-            double prev = Double.NaN;
+            java.util.TreeMap<Long, Double> map = new java.util.TreeMap<Long, Double>();
+            int removedLocal = 0;
             for (int i = 0; i < local.length(); i++) {
                 JSONObject o = local.getJSONObject(i);
+                long t = o.getLong("t");
                 double v = o.getDouble("v");
-                if (i == 0 || v != prev) {
-                    if (!seen.contains(o.getLong("t"))) return true;
+                if (v <= 0 || !validTs(t)) { removedLocal++; continue; }
+                map.put(Long.valueOf(t), Double.valueOf(v));
+            }
+            boolean added = false;
+            if (remote != null) {
+                for (int i = 0; i < remote.length(); i++) {
+                    JSONObject o = remote.getJSONObject(i);
+                    long t = o.getLong("t");
+                    double v = o.getDouble("v");
+                    if (v <= 0 || !validTs(t)) continue;
+                    Long key = Long.valueOf(t);
+                    if (!map.containsKey(key)) { map.put(key, Double.valueOf(v)); added = true; }
                 }
-                prev = v;
+            }
+            if (!added && removedLocal == 0) return null;
+            // Reconstruye ordenado por fecha, sin valores repetidos y con tope de puntos.
+            JSONArray arr = new JSONArray();
+            int total = map.size();
+            int skip = Math.max(0, total - MAX_CHANGES);
+            int seen = 0;
+            Double prev = null;
+            for (java.util.Map.Entry<Long, Double> en : map.entrySet()) {
+                double v = en.getValue().doubleValue();
+                boolean dup = (prev != null && Math.abs(prev.doubleValue() - v) < 1e-9);
+                prev = Double.valueOf(v);
+                if (dup) continue;
+                if (seen++ < skip) continue;
+                JSONObject np = new JSONObject();
+                np.put("t", en.getKey());
+                np.put("v", v);
+                arr.put(np);
+            }
+            return arr;
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    // ¿La serie local tiene algún cambio que la nube todavía no tiene?
+    private boolean hasNewLocal(JSONArray remote, JSONArray local) {
+        if (local == null || local.length() == 0) return false;
+        try {
+            java.util.HashSet<Long> seen = new java.util.HashSet<Long>();
+            if (remote != null) {
+                for (int i = 0; i < remote.length(); i++) {
+                    seen.add(Long.valueOf(remote.getJSONObject(i).getLong("t")));
+                }
+            }
+            for (int i = 0; i < local.length(); i++) {
+                JSONObject o = local.getJSONObject(i);
+                long t = o.getLong("t");
+                double v = o.getDouble("v");
+                if (v <= 0 || !validTs(t)) continue;
+                if (!seen.contains(Long.valueOf(t))) return true;
             }
         } catch (Exception ignored) { }
         return false;
     }
 
-    private JSONArray variationHist(JSONArray h) {
-        JSONArray out = new JSONArray();
+    // Payload del historial compartido (esquema v2; se mantienen las claves usd/eur/usdt/par
+    // para que las apps ya instaladas sigan entendiendo el formato).
+    private JSONObject buildSyncPayload(JSONArray usd, JSONArray eur, JSONArray usdt, JSONArray par) {
+        JSONObject out = new JSONObject();
         try {
-            double prev = Double.NaN;
-            for (int i = 0; i < h.length(); i++) {
-                JSONObject o = h.getJSONObject(i);
-                double v = o.getDouble("v");
-                if (i == 0 || v != prev) {
-                    JSONObject np = new JSONObject();
-                    np.put("t", o.getLong("t"));
-                    np.put("v", v);
-                    out.put(np);
-                }
-                prev = v;
-            }
+            out.put("v", 2);
+            out.put("updated", System.currentTimeMillis());
+            out.put("usd", usd);
+            out.put("eur", eur);
+            out.put("usdt", usdt);
+            out.put("par", par);
         } catch (Exception ignored) { }
         return out;
     }
 
-    private String httpFormPost(String urlStr, String body) throws Exception {
+    // Últimos N puntos de una serie (los más recientes).
+    private JSONArray trimTail(JSONArray src, int n) {
+        JSONArray out = new JSONArray();
+        if (src == null) return out;
+        try {
+            int start = Math.max(0, src.length() - n);
+            for (int i = start; i < src.length(); i++) out.put(src.getJSONObject(i));
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    // Devuelve el código de respuesta del POST (200-299 = escritura correcta).
+    private int httpFormPost(String urlStr, String body) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
         c.setConnectTimeout(10000);
         c.setReadTimeout(10000);
         c.setRequestMethod("POST");
         c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+        int code = 0;
         try {
             java.io.OutputStream os = c.getOutputStream();
             os.write(body.getBytes(StandardCharsets.UTF_8));
             os.flush();
             os.close();
+            code = c.getResponseCode();
         } finally {
             try { c.getInputStream(); } catch (Exception ignored) { }
             c.disconnect();
         }
-        return "";
+        return code;
     }
 
     private String httpGet(String urlStr) throws Exception {
@@ -4988,6 +5121,10 @@ public class MainActivity extends Activity {
         c.setRequestProperty("User-Agent", "SuperCambio/" + currentVersionName() + " (Android)");
         c.setRequestProperty("Accept", "application/json");
         try {
+            // Antes no se miraba el estado HTTP: una página de error (404/500) se procesaba
+            // como si fueran datos. Ahora cualquier respuesta no-2xx es un fallo.
+            int code = c.getResponseCode();
+            if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
             InputStream in = c.getInputStream();
             BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();

@@ -8,8 +8,8 @@
 
 Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 
-[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.10-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
-[![Versión](https://img.shields.io/badge/versión-3.0.10-success?style=flat-square)](../../releases)
+[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.11-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
+[![Versión](https://img.shields.io/badge/versión-3.0.11-success?style=flat-square)](../../releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#)
 [![Sin anuncios](https://img.shields.io/badge/100%25-sin_anuncios-orange?style=flat-square)](#)
 
@@ -33,7 +33,7 @@ Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 | 🌐 **Español e Inglés** | Cambiable desde la app |
 | 🧊 **Vidrio líquido** | Un solo interruptor en *Acerca de* activa desenfoque real, reflejos animados y superficies de vidrio en tarjetas, campos e iconos — sin botones extra sobre la barra |
 | 📌 **Aviso diario** | Notificación a las 3:35 PM con la tasa del día (activable) |
-| 🤝 **Historial compartido** | Las gráficas se enriquecen entre usuarios — solo cifras, nunca datos personales |
+| 🤝 **Historial compartido** | Las gráficas se enriquecen entre usuarios — solo cifras, nunca datos personales. Sube la serie fusionada (nadie borra el historial de otro) y valida cada escritura |
 | 🔤 **Tipografía e iconos** | Inter (equivalente libre de SF Pro) + iconos vectoriales estilo iOS en toda la interfaz |
 | 🚀 **Fluida** | Soporte 120 Hz, vibración háptica, pull-to-refresh, APK de menos de 1 MB |
 
