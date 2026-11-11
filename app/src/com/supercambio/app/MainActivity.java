@@ -97,10 +97,10 @@ public class MainActivity extends Activity {
     private static final String SYNC_KEY = "sc7a9f2d4c8e6b1a3";
     private static final String SYNC_READ = "https://textdb.online/" + SYNC_KEY + "/data.txt";
     private static final String SYNC_WRITE = "https://textdb.online/update";
-    private boolean syncBusy = false;
-    private long lastSyncTry = 0;
-    private boolean lastSyncOk = true;
-    private long lastSyncAt = 0;
+    private volatile boolean syncBusy = false;
+    private volatile long lastSyncTry = 0;
+    private volatile boolean lastSyncOk = true;
+    private volatile long lastSyncAt = 0;
     private static final String API_USD = "https://ve.dolarapi.com/v1/dolares";
     private static final String API_EUR = "https://ve.dolarapi.com/v1/euros";
     private static final String API_USDT = "https://criptoya.com/api/USDT/VES/1";
@@ -118,10 +118,13 @@ public class MainActivity extends Activity {
     private static final long CLOCK_SKEW_MAX = 6 * 3600000L; // 6 h por delante se considera error
     private static final long MIN_TS = 1420070400000L;   // 2015-01-01: puntos más viejos se descartan
     private static final long DEBOUNCE_MS = 1800000L;     // 30 min: descarta vaivenes de la API
+    private static final int HTTP_MAX = 512 * 1024;        // tope de respuesta HTTP (evita OOM)
 
     private Handler ui;
     private Runnable nextTick;
     private boolean nextExpanded = false;
+    private volatile boolean destroyed = false;   // la activity ya no existe: no se tocan vistas
+    private volatile boolean refreshing = false;  // hay un refresco en vuelo
 
     private int themeMode = 0; // 0=sistema 1=claro 2=oscuro
     private boolean blurOn = false;
@@ -252,6 +255,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        destroyed = true;
         nextExpanded = false;
         if (pageRates != null) pageRates.stopTicking();
         if (ui != null) { ui.removeCallbacks(blurTick); tickerOn = false; }
@@ -725,13 +729,40 @@ public class MainActivity extends Activity {
     }
 
     private long tsOf(JSONObject o) {
-        String s = o.optString("fechaActualizacion", "");
-        if (s.length() == 0) return 0;
+        return tsOfISO(o.optString("fechaActualizacion", ""));
+    }
+
+    // Fecha ISO-8601 de la API. LLEGA CON OFFSET: la tasa oficial viene en hora Caracas
+    // ("2026-11-11T00:00:00-04:00") y el paralelo en UTC ("2026-11-11T18:01:34.369Z").
+    // Antes se parseaban TODAS como Caracas → el paralelo quedaba 4 h por delante y el
+    // historial compartido se llenaba de puntos en el futuro (4 h < el margen de 6 h).
+    static long tsOfISO(String s) {
+        if (s == null || s.length() < 19) return 0;
         try {
+            long offMin = 0;
+            boolean hasOff = false;
+            if (s.endsWith("Z") || s.endsWith("z")) {
+                hasOff = true;
+            } else {
+                int p = s.indexOf('+', 19);
+                int m = s.indexOf('-', 19);
+                if (p < 0 || (m >= 0 && m < p)) p = m;
+                if (p >= 19 && s.length() >= p + 6) {
+                    int oh = Integer.parseInt(s.substring(p + 1, p + 3));
+                    int om = Integer.parseInt(s.substring(p + 4, p + 6));
+                    offMin = oh * 60 + om;
+                    if (s.charAt(p) == '-') offMin = -offMin;
+                    hasOff = true;
+                }
+            }
             SimpleDateFormat p = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", new Locale("es"));
-            p.setTimeZone(TimeZone.getTimeZone("America/Caracas"));
-            Date d = p.parse(s.substring(0, Math.min(19, s.length())));
-            return d != null ? d.getTime() : 0;
+            p.setLenient(false);
+            p.setTimeZone(TimeZone.getTimeZone(hasOff ? "UTC" : "America/Caracas"));
+            Date d = p.parse(s.substring(0, 19));
+            if (d == null) return 0;
+            long t = d.getTime();
+            if (hasOff) t -= offMin * 60000L;   // instante UTC = hora local - offset de la zona
+            return t;
         } catch (Exception e) {
             return 0;
         }
@@ -2329,7 +2360,7 @@ public class MainActivity extends Activity {
         TextView nextCountdown, nextStatus, datePill;
         Button nextBtn;
         ImageView dateAct;
-        String netErr;
+        volatile String netErr;
         boolean autoBusy = false;
         long lastAutoTry = 0;
         long celebrateUntil = 0;
@@ -2614,10 +2645,11 @@ public class MainActivity extends Activity {
                     try {
                         JSONArray arr = new JSONArray(httpGet(API_USD));
                         for (int i = 0; i < arr.length(); i++) {
-                            JSONObject o = arr.getJSONObject(i);
+                            JSONObject o = arr.optJSONObject(i);
+                            if (o == null) continue;
                             if ("oficial".equals(o.optString("fuente", ""))) {
-                                newRate = o.getDouble("promedio");
-                                newTs = tsOf(o);
+                                double v = o.optDouble("promedio", 0);
+                                if (v > 0) { newRate = v; newTs = tsOf(o); }
                             }
                         }
                     } catch (Exception e) { netErr = String.valueOf(e.getMessage()); }
@@ -2630,12 +2662,16 @@ public class MainActivity extends Activity {
                             netErr = null;
                         }
                     }
+                    // El error se captura AQUÍ: antes la UI lo borraba (netErr = null) antes de
+                    // leerlo y la rama "Sin conexión con el BCV" nunca se ejecutaba.
+                    final String fErr = netErr;
                     final double fRate = newRate;
                     final long fTs = newTs;
                     ui.post(new Runnable() {
                         public void run() {
                             autoBusy = false;
                             netErr = null;
+                            if (destroyed) return;
                             if (!nextExpanded) return;
                             if (fRate > 0 && fTs > tUsd) {
                                 prevUsd = bcvUsd;
@@ -2661,7 +2697,7 @@ public class MainActivity extends Activity {
                             } else {
                                 dateAct.setEnabled(true);
                                 dateAct.setAlpha(1f);
-                                if (netErr != null) {
+                                if (fErr != null) {
                                     nextStatus.setText(iconText(R.drawable.ic_wifi_off, S("Sin conexión con el BCV · revisando cada minuto…", "Can't reach the BCV · retrying every minute…"), 13, col("text_secondary")));
                                 } else {
                                     int dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
@@ -3124,7 +3160,12 @@ public class MainActivity extends Activity {
                         return true;
                     }
                     if (act == MotionEvent.ACTION_POINTER_UP) {
-                        sX0 = ev.getX(); sY0 = ev.getY(); gPanT0 = startT;
+                        // Se rebasa con el dedo que QUEDA: el que sube puede ser el índice 0 y
+                        // usar su X hacía que el primer MOVE saltara a un punto sin relación.
+                        int up = ev.getActionIndex();
+                        int rem = (up == 0) ? 1 : 0;
+                        sX0 = ev.getX(rem); sY0 = ev.getY(rem);
+                        gPanT0 = startT;
                         pan2 = false; gSpan = -1f; scrub = false; scrubPass = false;
                         invalidate();
                         return true;
@@ -3392,11 +3433,16 @@ public class MainActivity extends Activity {
 
         @Override
         protected void onDraw(Canvas canvas) {
+            int saveCnt = canvas.save();
             try {
                 drawChart(canvas);
             } catch (Throwable t) {
                 // Red de seguridad: un fallo al dibujar NUNCA debe cerrar la app.
                 // El siguiente frame lo vuelve a intentar.
+            } finally {
+                // Si el dibujado falló a medias, el clip del gráfico no puede quedar activo
+                // (afectaría a las vistas que se dibujan después).
+                canvas.restoreToCount(saveCnt);
             }
         }
 
@@ -4754,6 +4800,8 @@ public class MainActivity extends Activity {
     // ================= RED Y REFRESCO =================
 
     private void refresh() {
+        if (refreshing || destroyed) return;   // no dos refrescos en paralelo
+        refreshing = true;
         pageRates.status.setText(brandSpan(S("Actualizando…", "Updating…")));
         pageRates.setBusy(true);
         new Thread(new Runnable() {
@@ -4763,17 +4811,24 @@ public class MainActivity extends Activity {
                 try {
                     JSONArray arr = new JSONArray(httpGet(API_USD));
                     for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
+                        JSONObject o = arr.optJSONObject(i);
+                        if (o == null) continue;   // un elemento malo no tira el bloque entero
                         String fuente = o.optString("fuente", "");
-                        if ("oficial".equals(fuente)) { nUsd = o.getDouble("promedio"); tsUsd = tsOf(o); }
-                        else if ("paralelo".equals(fuente)) { nPar = o.getDouble("promedio"); tsPar = tsOf(o); }
+                        double v = o.optDouble("promedio", 0);
+                        if (v <= 0) continue;
+                        if ("oficial".equals(fuente)) { nUsd = v; tsUsd = tsOf(o); }
+                        else if ("paralelo".equals(fuente)) { nPar = v; tsPar = tsOf(o); }
                     }
                 } catch (Exception ignored) { }
                 try {
                     JSONArray arr = new JSONArray(httpGet(API_EUR));
                     for (int i = 0; i < arr.length(); i++) {
-                        JSONObject o = arr.getJSONObject(i);
-                        if ("oficial".equals(o.optString("fuente", ""))) { nEur = o.getDouble("promedio"); tsEur = tsOf(o); }
+                        JSONObject o = arr.optJSONObject(i);
+                        if (o == null) continue;
+                        if ("oficial".equals(o.optString("fuente", ""))) {
+                            double v = o.optDouble("promedio", 0);
+                            if (v > 0) { nEur = v; tsEur = tsOf(o); }
+                        }
                     }
                 } catch (Exception ignored) { }
                 try {
@@ -4788,6 +4843,8 @@ public class MainActivity extends Activity {
                 final boolean ok = nUsd > 0 || nEur > 0 || nUsdt > 0 || nPar > 0;
                 ui.post(new Runnable() {
                     public void run() {
+                        refreshing = false;
+                        if (destroyed) return;
                         // Aplicar valores NUEVOS en el hilo de UI (antes se mutaban en el
                         // hilo de fondo: carrera con gráficas/estado y puntos fantasma)
                         if (fUsd > 0) {
@@ -5246,6 +5303,7 @@ public class MainActivity extends Activity {
                 ui.post(new Runnable() {
                     public void run() {
                         updBusy = false;
+                        if (destroyed) return;
                         if (!fOk) {
                             // No tocar prefs ni el estado: la verificación FALLÓ
                             if (manual) Toast.makeText(MainActivity.this,
@@ -5324,11 +5382,15 @@ public class MainActivity extends Activity {
 
     private void syncSharedHist(boolean force) {
         long now = System.currentTimeMillis();
-        if (syncBusy) return;
+        if (syncBusy || destroyed) return;
         long wait = lastSyncOk ? SYNC_THROTTLE : SYNC_RETRY;
         if (!force && now - lastSyncTry < wait) return;
         syncBusy = true;
         lastSyncTry = now;
+        // Copia de la serie local HECHA EN EL HILO DE UI: el hilo de red no puede recorrer
+        // un JSONArray que la UI está mutando (recordChange) → índices inconsistentes.
+        final JSONArray sUsd = snap(chgUsd), sEur = snap(chgEur);
+        final JSONArray sUsdt = snap(chgUsdt), sPar = snap(chgPar);
         new Thread(new Runnable() {
             public void run() {
                 boolean ok = false;
@@ -5341,6 +5403,9 @@ public class MainActivity extends Activity {
                         } catch (Exception e) {
                             return;   // respuesta inválida: fail-safe, no se escribe nada
                         }
+                        // Si no trae ninguna de nuestras claves no es nuestra nube (o vino
+                        // corrupto): subir la serie local la BORRARÍA. Fail-safe: no se escribe.
+                        if (!knownSeries(remote)) return;
                     }
                     final JSONArray rUsd = remote.optJSONArray("usd");
                     final JSONArray rEur = remote.optJSONArray("eur");
@@ -5348,17 +5413,23 @@ public class MainActivity extends Activity {
                     final JSONArray rPar = remote.optJSONArray("par");
 
                     // Fusión por timestamp (NO muta los arrays vivos; los aplica la UI).
-                    final JSONArray mUsd = mergeChanges(rUsd, chgUsd, DEBOUNCE_MS);
-                    final JSONArray mEur = mergeChanges(rEur, chgEur, DEBOUNCE_MS);
-                    final JSONArray mUsdt = mergeChanges(rUsdt, chgUsdt, 0L);
-                    final JSONArray mPar = mergeChanges(rPar, chgPar, DEBOUNCE_MS);
+                    final JSONArray mUsd = mergeChanges(rUsd, sUsd, DEBOUNCE_MS);
+                    final JSONArray mEur = mergeChanges(rEur, sEur, DEBOUNCE_MS);
+                    final JSONArray mUsdt = mergeChanges(rUsdt, sUsdt, 0L);
+                    final JSONArray mPar = mergeChanges(rPar, sPar, DEBOUNCE_MS);
+                    // Una fusión vacía sobre una nube que SÍ tenía datos = reloj del dispositivo
+                    // desincronizado o datos corruptos. Subir esa serie vacía borraría el
+                    // historial de todos: se aborta la sincronización.
+                    if (lostSeries(mUsd, rUsd) || lostSeries(mEur, rEur)
+                            || lostSeries(mUsdt, rUsdt) || lostSeries(mPar, rPar)) return;
                     final boolean changed = mUsd != null || mEur != null || mUsdt != null || mPar != null;
-                    final boolean localNew = hasNewLocal(rUsd, chgUsd) || hasNewLocal(rEur, chgEur)
-                            || hasNewLocal(rUsdt, chgUsdt) || hasNewLocal(rPar, chgPar);
+                    final boolean localNew = hasNewLocal(rUsd, sUsd) || hasNewLocal(rEur, sEur)
+                            || hasNewLocal(rUsdt, sUsdt) || hasNewLocal(rPar, sPar);
 
                     if (changed) {
                         ui.post(new Runnable() {
                             public void run() {
+                                if (destroyed) return;
                                 if (mUsd != null) chgUsd = mUsd;
                                 if (mEur != null) chgEur = mEur;
                                 if (mUsdt != null) chgUsdt = mUsdt;
@@ -5371,10 +5442,10 @@ public class MainActivity extends Activity {
 
                     if (changed || localNew) {
                         // Se sube la serie FUSIONADA: lo que ya hay en la nube + lo local.
-                        JSONArray uUsd = (mUsd != null) ? mUsd : chgUsd;
-                        JSONArray uEur = (mEur != null) ? mEur : chgEur;
-                        JSONArray uUsdt = (mUsdt != null) ? mUsdt : chgUsdt;
-                        JSONArray uPar = (mPar != null) ? mPar : chgPar;
+                        JSONArray uUsd = (mUsd != null) ? mUsd : sUsd;
+                        JSONArray uEur = (mEur != null) ? mEur : sEur;
+                        JSONArray uUsdt = (mUsdt != null) ? mUsdt : sUsdt;
+                        JSONArray uPar = (mPar != null) ? mPar : sPar;
                         int limUsd = SYNC_MAX_USD, limEur = SYNC_MAX_EUR;
                         int limUsdt = SYNC_MAX_USDT, limPar = SYNC_MAX_PAR;
                         String body = "";
@@ -5455,8 +5526,35 @@ public class MainActivity extends Activity {
             }
             if (debounceMs > 0) arr = dropFlaps(arr, debounceMs);
             return arr;
-        } catch (Exception ignored) { }
-        return null;
+        } catch (Exception e) {
+            // No se puede distinguir "no había nada que fusionar" de "la nube vino corrupta".
+            // Devolver null en ambos casos hacía que el llamador subiera SOLO la serie local
+            // y BORRARA los puntos que aportaron los demás. Ahora se propaga el error y la
+            // sincronización entera se aborta sin escribir nada.
+            throw new RuntimeException(e);
+        }
+    }
+
+    // Copia profunda de una serie: el hilo de red no debe recorrer el mismo JSONArray que
+    // la UI está mutando.
+    private JSONArray snap(JSONArray src) {
+        if (src == null) return null;
+        try {
+            return new JSONArray(src.toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ¿El JSON de la nube trae alguna de nuestras claves? Si no, no es nuestra nube.
+    private boolean knownSeries(JSONObject o) {
+        return o.has("usd") || o.has("eur") || o.has("usdt") || o.has("par") || o.has("v");
+    }
+
+    // La fusión no puede vaciar una serie que la nube sí tenía (reloj desincronizado o
+    // datos corruptos): en ese caso se aborta la sincronización en vez de borrar el historial.
+    private boolean lostSeries(JSONArray merged, JSONArray remote) {
+        return merged != null && merged.length() == 0 && remote != null && remote.length() > 0;
     }
 
     // Elimina los vaivenes: si la serie va A → B → A y B duró menos de debounceMs, se
@@ -5469,22 +5567,22 @@ public class MainActivity extends Activity {
                 JSONObject o = src.getJSONObject(i);
                 long t = o.getLong("t");
                 double v = o.getDouble("v");
-                if (out.length() >= 1 && i + 1 < src.length()) {
+                // ¿el punto actual es un vaivén? (A → B → A con B de corta duración)
+                // Se compara con el punto ANTERIOR de la serie original y se descarta el
+                // ACTUAL. Antes se borraba el punto anterior (el cambio real) y se
+                // guardaba el pico: el historial compartido perdía datos de verdad.
+                if (i > 0 && i + 1 < src.length()) {
+                    JSONObject prev = src.getJSONObject(i - 1);
                     JSONObject next = src.getJSONObject(i + 1);
-                    double nv = next.getDouble("v");
-                    long nt = next.getLong("t");
-                    if (Math.abs(nv - v) < 1e-9) continue;   // valor repetido: ya lo cubre el colapso
-                }
-                // ¿el punto ANTERIOR es un vaivén? (vuelve al valor de dos puntos antes)
-                if (out.length() >= 2 && i + 1 < src.length()) {
-                    JSONObject prev2 = out.getJSONObject(out.length() - 2);
-                    JSONObject next = src.getJSONObject(i + 1);
-                    if (Math.abs(prev2.getDouble("v") - next.getDouble("v")) < 1e-9
+                    if (Math.abs(prev.getDouble("v") - next.getDouble("v")) < 1e-9
                             && (next.getLong("t") - t) < debounceMs) {
-                        out.remove(out.length() - 1);         // se cae el transitorio
-                        out.put(o);                           // y el valor vuelve al anterior
-                        continue;
+                        continue;   // era transitorio: no es un cambio de tasa
                     }
+                }
+                // valor repetido respecto al último punto aceptado (ya lo cubre el colapso)
+                if (out.length() >= 1) {
+                    JSONObject last = out.getJSONObject(out.length() - 1);
+                    if (Math.abs(last.getDouble("v") - v) < 1e-9) continue;
                 }
                 out.put(o);
             }
@@ -5576,7 +5674,10 @@ public class MainActivity extends Activity {
             BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             String line;
-            while ((line = r.readLine()) != null) sb.append(line);
+            while ((line = r.readLine()) != null) {
+                sb.append(line);
+                if (sb.length() > HTTP_MAX) throw new java.io.IOException("respuesta demasiado grande");
+            }
             return sb.toString();
         } finally {
             c.disconnect();

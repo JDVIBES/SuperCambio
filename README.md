@@ -8,8 +8,8 @@
 
 Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 
-[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.13-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
-[![Versión](https://img.shields.io/badge/versión-3.0.13-success?style=flat-square)](../../releases)
+[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.14-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
+[![Versión](https://img.shields.io/badge/versión-3.0.14-success?style=flat-square)](../../releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#)
 [![Sin anuncios](https://img.shields.io/badge/100%25-sin_anuncios-orange?style=flat-square)](#)
 
@@ -76,6 +76,18 @@ aapt add unsigned.apk classes.dex
 # Genera tu propia keystore:
 keytool -genkeypair -keystore mi-keystore.keystore -alias app -keyalg RSA -validity 10000
 apksigner sign --ks mi-keystore.keystore --out SuperCambio.apk unsigned.apk
+```
+
+### 🧪 Pruebas
+
+`test/AuditTest.java` comprueba la lógica crítica (fechas ISO con offset, depuración de
+vaivenes, fusión del historial compartido y búsqueda de bancos) contra el código real:
+
+```bash
+curl -sL -o /tmp/json.jar https://repo1.maven.org/maven2/org/json/json/20231013/json-20231013.jar
+mkdir -p /tmp/tc && javac -nowarn -encoding UTF-8 -cp "/tmp/json.jar:android-jar/android.jar:libs/zxing-core-3.3.3.jar" \
+  -d /tmp/tc app/src/com/supercambio/app/*.java app/gen/com/supercambio/app/R.java test/AuditTest.java
+java -cp "/tmp/tc:/tmp/json.jar:android-jar/android.jar" com.supercambio.app.AuditTest
 ```
 
 ## 🧩 Arquitectura

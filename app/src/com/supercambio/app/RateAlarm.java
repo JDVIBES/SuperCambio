@@ -32,9 +32,13 @@ public class RateAlarm extends BroadcastReceiver {
         final PendingResult pr = goAsync();
         new Thread(new Runnable() {
             public void run() {
-                fetchLatest(ctx);
-                push(ctx);
-                if (pr != null) pr.finish();
+                try {
+                    fetchLatest(ctx);
+                    push(ctx);
+                } finally {
+                    // finish() SIEMPRE: si no, el sistema mata la app por timeout del broadcast.
+                    if (pr != null) pr.finish();
+                }
             }
         }).start();
     }
@@ -107,40 +111,50 @@ public class RateAlarm extends BroadcastReceiver {
             JSONArray arr = new JSONArray(s);
             SharedPreferences p = ctx.getSharedPreferences("supercambio", Context.MODE_PRIVATE);
             SharedPreferences.Editor e = p.edit();
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject o = arr.getJSONObject(i);
-                String fu = o.optString("fuente", "");
-                if ("oficial".equals(fu)) {
+            try {
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    String fu = o.optString("fuente", "");
                     double v = o.optDouble("promedio", 0);
                     long t = tsOfS(o);
-                    if (v > 0) {
+                    if (v <= 0) continue;
+                    if ("oficial".equals(fu)) {
+                        // Solo si es MÁS NUEVO que lo guardado: una réplica vieja del API no
+                        // puede pisar la tasa que el usuario ya tenía.
+                        if (t > 0 && t <= p.getLong("tsUsd", 0)) continue;
                         e.putLong("usd", Double.doubleToRawLongBits(v));
                         if (t > 0) e.putLong("tsUsd", t);
-                    }
-                } else if ("paralelo".equals(fu)) {
-                    double v = o.optDouble("promedio", 0);
-                    long t = tsOfS(o);
-                    if (v > 0) {
+                    } else if ("paralelo".equals(fu)) {
+                        if (t > 0 && t <= p.getLong("tsPar", 0)) continue;
                         e.putLong("par", Double.doubleToRawLongBits(v));
                         if (t > 0) e.putLong("tsPar", t);
                     }
                 }
+            } finally {
+                // Aunque un elemento venga mal, se guarda lo que sí se pudo leer.
+                e.apply();
             }
-            e.apply();
         } catch (Exception ignored) { }
     }
 
     private static String httpGetS(String urlStr) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
-        c.setConnectTimeout(8000);
-        c.setReadTimeout(8000);
+        c.setConnectTimeout(4000);
+        c.setReadTimeout(4000);
         c.setRequestProperty("User-Agent", "SuperCambio/2.0 (Android)");
         try {
             InputStream in = c.getInputStream();
             BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             String line;
-            while ((line = r.readLine()) != null) sb.append(line);
+            // Tope total de ~8 s: el timeout de lectura es por lectura, no por respuesta
+            // (una página lenta cruzaba el límite de 10 s del broadcast y mataba la app).
+            long deadline = System.currentTimeMillis() + 8000L;
+            while ((line = r.readLine()) != null) {
+                sb.append(line);
+                if (System.currentTimeMillis() > deadline) break;
+            }
             return sb.toString();
         } finally {
             c.disconnect();
@@ -149,13 +163,9 @@ public class RateAlarm extends BroadcastReceiver {
 
     private static long tsOfS(JSONObject o) {
         try {
-            String f = o.optString("fechaActualizacion", "");
-            if (f.length() >= 19) {
-                SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
-                df.setTimeZone(TimeZone.getTimeZone("America/Caracas"));
-                Date d = df.parse(f.substring(0, 19));
-                if (d != null) return d.getTime();
-            }
+            // El paralelo llega en UTC y el oficial con offset -04:00: el parser de la app
+            // respeta el offset (si no, el paralelo quedaba 4 h por delante).
+            return MainActivity.tsOfISO(o.optString("fechaActualizacion", ""));
         } catch (Exception ignored) { }
         return 0;
     }

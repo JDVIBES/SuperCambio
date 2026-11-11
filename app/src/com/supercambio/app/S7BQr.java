@@ -163,13 +163,36 @@ public final class S7BQr {
                 }
             }
         }
-        for (int i = 0; i < BANKS.length; i++) {
-            String bankName = normalizeName(BANKS[i][1]);
-            if (bankName.contains(norm) || norm.contains(bankName)) {
-                return BANKS[i][0];
+        // Fallback difuso: sin palabras vacías ("de", "del", "la") y con al menos 3 letras.
+        // Antes ("b" o "banco") elegía el primer banco que contuviera el texto (banco
+        // equivocado en silencio) y "banco Venezuela" no znajaba "Banco de Venezuela".
+        String words = normWords(raw);
+        if (words.length() >= 3) {
+            for (int i = 0; i < BANKS.length; i++) {
+                if (normWords(BANKS[i][1]).contains(words)) {
+                    return BANKS[i][0];
+                }
             }
         }
         return null;
+    }
+
+    // Normaliza un nombre de banco quitando las palabras vacías ("de", "del", "la", "el"):
+    // "Banco de Venezuela" → "bancovenezuela" (igual que la consulta "banco Venezuela").
+    private static String normWords(String value) {
+        String[] parts = value.toLowerCase(LocaleHolder.LOCALE).split("[\\s,;]+");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            String w = normalizeName(parts[i]);
+            if (w.length() == 0) {
+                continue;
+            }
+            if (w.equals("de") || w.equals("del") || w.equals("la") || w.equals("el")) {
+                continue;
+            }
+            sb.append(w);
+        }
+        return sb.toString();
     }
 
     public static boolean bankMatches(String code, String name, String query) {
@@ -252,13 +275,14 @@ public final class S7BQr {
         }
         char first = id.charAt(0);
         if (first >= '0' && first <= '9') {
-            return "V" + id;
+            id = "V" + id;      // cédula numérica → prefijo V (y se valida como las demás)
+            first = 'V';
         }
         if ("VJGE".indexOf(first) < 0) {
             return null;
         }
-        if (id.length() < 2) {
-            return null;
+        if (id.length() < 2 || id.length() > 11) {
+            return null;       // cédula: prefijo + hasta 10 dígitos
         }
         for (int i = 1; i < id.length(); i++) {
             char c = id.charAt(i);

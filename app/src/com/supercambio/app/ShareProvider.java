@@ -20,20 +20,28 @@ public class ShareProvider extends ContentProvider {
 
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-        String name = uri.getLastPathSegment();
-        if (name == null || name.isEmpty()) name = "compartir.png";
-        // Evitar path traversal
-        if (name.contains("/") || name.contains("..")) name = "compartir.png";
+        String name = resolve(uri);
         File f = new File(getContext().getCacheDir(), name);
         return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
     }
 
     @Override
     public String getType(Uri uri) {
-        String name = uri.getLastPathSegment();
-        if (name != null && name.endsWith(".json")) return "application/json";
-        if (name != null && name.endsWith(".apk")) return "application/vnd.android.package-archive";
+        // El tipo se saca del nombre REAL que se sirve (si no, el MIME y los bytes no
+        // coinciden: se anunciaba JSON y se entregaba un PNG).
+        String name = resolve(uri);
+        if (name.endsWith(".json")) return "application/json";
+        if (name.endsWith(".apk")) return "application/vnd.android.package-archive";
         return "image/png";
+    }
+
+    // Nombre real del archivo: solo PNG/APK/JSON del caché y sin path traversal.
+    private String resolve(Uri uri) {
+        String name = uri.getLastPathSegment();
+        if (name == null || name.isEmpty()) return "compartir.png";
+        if (name.contains("/") || name.contains("..")) return "compartir.png";
+        if (!(name.endsWith(".png") || name.endsWith(".apk") || name.endsWith(".json"))) return "compartir.png";
+        return name;
     }
 
     @Override
