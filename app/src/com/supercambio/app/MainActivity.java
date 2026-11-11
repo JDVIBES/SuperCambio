@@ -323,7 +323,7 @@ public class MainActivity extends Activity {
         return tv(text, sizeSp, bold, color);
     }
 
-    // Rango de codepoints que viven en AppleEmoji.ttf (y防空solo ahí, no en Inter)
+    // Rango de codepoints que viven en AppleEmoji.ttf (y solo ahí, no en Inter)
     private static final int[] APPLE_CPS = {
             0xFE0F, 0x20E3, 0x200D, 0x2705, 0x231B, 0x23F1, 0x23F3, 0x23F8, 0x274C,
             0x2764, 0x26A0, 0x2B07, 0x2B50, 0x1F1EA, 0x1F1FB, 0x1F389, 0x1F441,
@@ -1025,6 +1025,7 @@ public class MainActivity extends Activity {
     }
 
     private void writeHistoryCsv(Uri uri) {
+        java.io.OutputStream os = null;
         try {
             StringBuilder sb = new StringBuilder();
             sb.append("tasa,fecha,valor_bs\n");
@@ -1032,13 +1033,14 @@ public class MainActivity extends Activity {
             appendCsv(sb, S("Dólar paralelo", "Parallel dollar"), histPar);
             appendCsv(sb, S("Euro BCV", "BCV Euro"), histEur);
             appendCsv(sb, "USDT", histUsdt);
-            java.io.OutputStream os = getContentResolver().openOutputStream(uri);
+            os = getContentResolver().openOutputStream(uri);
             if (os == null) throw new Exception("stream");
             os.write(sb.toString().getBytes("UTF-8"));
-            os.close();
             Toast.makeText(this, S("✅ Historial exportado", "✅ History exported"), Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Toast.makeText(this, S("No se pudo guardar el CSV", "Couldn't save the CSV"), Toast.LENGTH_SHORT).show();
+        } finally {
+            if (os != null) { try { os.close(); } catch (Exception ignored) { } }
         }
     }
 
@@ -1145,7 +1147,7 @@ public class MainActivity extends Activity {
             search.setTypeface(TF_REG);
             search.setTextColor(col("text_primary"));
             search.setHintTextColor(col("text_secondary"));
-            search.setHint(S("🔍  Buscar perfiles…", "🔍  Search profiles…"));
+            search.setHint(brandSpan(S("🔍  Buscar perfiles…", "🔍  Search profiles…")));
             search.setBackground(rounded(col("input_bg"), 14));
             search.setPadding(dp(14), dp(11), dp(14), dp(11));
             LinearLayout.LayoutParams seLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1185,9 +1187,9 @@ public class MainActivity extends Activity {
                 shown++;
             }
             if (shown == 0 && q.length() > 0) {
-                empty.setText(S("🔍 Sin resultados para tu búsqueda.", "🔍 No results for your search."));
+                empty.setText(brandSpan(S("🔍 Sin resultados para tu búsqueda.", "🔍 No results for your search.")));
             } else {
-                empty.setText(S("💳 Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "💳 No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."));
+                empty.setText(brandSpan(S("💳 Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "💳 No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy.")));
             }
             empty.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
             nudgeBlur();
@@ -1548,7 +1550,9 @@ public class MainActivity extends Activity {
         if (paralelo > 0) sb.append(S("Dólar paralelo", "Parallel dollar")).append(": ").append(fmt(paralelo)).append(" Bs.\n");
         if (bcvEur > 0) sb.append(S("Euro BCV", "BCV Euro")).append(": ").append(fmt(bcvEur)).append(" Bs.\n");
         if (usdt > 0) sb.append("USDT: ").append(fmt(usdt)).append(" Bs.\n");
-        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d MMM, HH:mm", new java.util.Locale("es", "VE"));
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(
+                langEn ? "MMM d, HH:mm" : "d MMM, HH:mm",
+                langEn ? new java.util.Locale("en", "US") : new java.util.Locale("es", "VE"));
         df.setTimeZone(java.util.TimeZone.getTimeZone("America/Caracas"));
         sb.append("\n").append(df.format(new java.util.Date()));
         copyClip("Tasas", sb.toString().trim(), null);
@@ -3060,9 +3064,9 @@ public class MainActivity extends Activity {
                     double res = amt / rate;
                     if (hasFee) {
                         double feeAmt = res * fee / 100.0;
-                        setResultAnimated(fmt(res - feeAmt) + " " + sym);
+                        setResultAnimated(fmt(res - feeAmt));
                     } else {
-                        setResultAnimated(fmt(res) + " " + sym);
+                        setResultAnimated(fmt(res));
                     }
                 } else {
                     setResultAnimated("—");
