@@ -115,10 +115,12 @@ public class MainActivity extends Activity {
     private static final int SYNC_MAX_PAR = 60;
     private static final long SYNC_THROTTLE = 900000L;   // 15 min entre sincronizaciones
     private static final long SYNC_RETRY = 60000L;       // 1 min tras un fallo
-    private static final long CLOCK_SKEW_MAX = 6 * 3600000L; // 6 h por delante se considera error
+    private static final long CLOCK_SKEW_MAX = 2 * 3600000L; // 2 h por delante = reloj roto (antes 6 h:
+    // el margen de 6 h tapaba el bug de parseo UTC y dejaba puntos 4 h adelante en la nube)
     private static final long MIN_TS = 1420070400000L;   // 2015-01-01: puntos más viejos se descartan
     private static final long DEBOUNCE_MS = 1800000L;     // 30 min: descarta vaivenes de la API
     private static final int HTTP_MAX = 512 * 1024;        // tope de respuesta HTTP (evita OOM)
+    private static final long APK_MAX_BYTES = 60L * 1024L * 1024L; // tope del APK descargado
 
     private Handler ui;
     private Runnable nextTick;
@@ -800,6 +802,18 @@ public class MainActivity extends Activity {
         if (dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) return false;
         int h = c.get(Calendar.HOUR_OF_DAY), m = c.get(Calendar.MINUTE);
         return h > 15 || (h == 15 && m >= 30);
+    }
+
+    // Sello de la API para las tasas oficiales: 00:00 de Caracas del día de publicación.
+    // El respaldo del sitio del BCV no trae fecha, así que se usa la misma convención.
+    private long bcvDayStamp(long now) {
+        Calendar c = Calendar.getInstance(TimeZone.getTimeZone("America/Caracas"));
+        c.setTimeInMillis(now);
+        c.set(Calendar.HOUR_OF_DAY, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
     }
 
     private String countdownText(long diff) {
@@ -2658,7 +2672,12 @@ public class MainActivity extends Activity {
                         long nowMs = System.currentTimeMillis();
                         if (bcv > 0 && (Math.abs(bcv - bcvUsd) > 0.00001 || afterBcvSlot())) {
                             newRate = bcv;
-                            newTs = nowMs;
+                            // El sitio del BCV no trae fecha: se usa la MISMA convención que la
+                            // API (00:00 de Caracas del día de publicación) para que todos los
+                            // dispositivos marquen el mismo instante. Con la hora del teléfono
+                            // cada dispositivo ponía el punto en un momento distinto y el
+                            // historial compartido se llenaba de cambios fantasma.
+                            newTs = bcvDayStamp(System.currentTimeMillis());
                             netErr = null;
                         }
                     }
@@ -5110,14 +5129,18 @@ public class MainActivity extends Activity {
                     conn.setRequestProperty("User-Agent", "SuperCambio/" + currentVersionName() + " (Android)");
                     conn.connect();
                     long len = conn.getContentLength();
+                    // Tope de tamaño: un APK de la app son ~1,3 MB; se acepta hasta 60 MB y
+                    // si el servidor anuncia un tamaño distinto al que se guarda, no se instala.
+                    if (len > APK_MAX_BYTES) throw new java.io.IOException("APK demasiado grande");
                     InputStream in = conn.getInputStream();
                     FileOutputStream fo = new FileOutputStream(out);
                     byte[] buf = new byte[8192];
                     long total = 0;
                     int n;
                     while ((n = in.read(buf)) > 0 && !dlCancel) {
-                        fo.write(buf, 0, n);
                         total += n;
+                        if (total > APK_MAX_BYTES) throw new java.io.IOException("APK demasiado grande");
+                        fo.write(buf, 0, n);
                         if (len > 0) {
                             final int pc = (int) (total * 100 / len);
                             final String st = fmtMB(total) + S(" de ", " of ") + fmtMB(len);
@@ -5134,7 +5157,7 @@ public class MainActivity extends Activity {
                     fo.close();
                     in.close();
                     conn.disconnect();
-                    ok = !dlCancel && total > 0;
+                    ok = !dlCancel && total > 0 && (len <= 0 || len == total);
                 } catch (Exception ignored) { }
                 if (!ok) out.delete();
                 final boolean fOk = ok;
@@ -5291,8 +5314,23 @@ public class MainActivity extends Activity {
                     notes = r.optString("body", "");
                     JSONArray assets = r.optJSONArray("assets");
                     if (assets != null && assets.length() > 0) {
-                        url = assets.getJSONObject(0).optString("browser_download_url", "");
-                        size = assets.getJSONObject(0).optLong("size", 0);
+                        // Se toma el asset que ES el APK (el orden de los assets es arbitrario:
+                        // assets[0] podía ser un checksum u otro archivo).
+                        for (int i = 0; i < assets.length(); i++) {
+                            JSONObject a = assets.optJSONObject(i);
+                            if (a == null) continue;
+                            String nm = a.optString("name", "");
+                            String dl = a.optString("browser_download_url", "");
+                            if (nm.length() > 0 && nm.toLowerCase().endsWith(".apk") && dl.length() > 0) {
+                                url = dl;
+                                size = a.optLong("size", 0);
+                                break;
+                            }
+                        }
+                        if (url.length() == 0) {   // sin .apk: se usa el primero (comportamiento anterior)
+                            url = assets.getJSONObject(0).optString("browser_download_url", "");
+                            size = assets.getJSONObject(0).optLong("size", 0);
+                        }
                     }
                     fetchOk = true;
                 } catch (Exception ignored) { }

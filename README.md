@@ -8,8 +8,8 @@
 
 Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 
-[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.14-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
-[![Versión](https://img.shields.io/badge/versión-3.0.14-success?style=flat-square)](../../releases)
+[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.15-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
+[![Versión](https://img.shields.io/badge/versión-3.0.15-success?style=flat-square)](../../releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#)
 [![Sin anuncios](https://img.shields.io/badge/100%25-sin_anuncios-orange?style=flat-square)](#)
 
@@ -54,28 +54,35 @@ Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 
 ## 🛠️ Compilar desde fuente
 
-Compilado 100% en Termux (Android) sin Android Studio:
+Compilado 100% en Termux (Android) sin Android Studio. Lo más fácil es usar el script:
 
 ```bash
-pkg install -y aapt apksigner dx ecj git
-
+pkg install -y aapt apksigner zipalign d8 ecj git
 git clone https://github.com/JDVIBES/SuperCambio.git && cd SuperCambio
 mkdir -p out android-jar app/gen
 # Descarga el android.jar de API 28 (Termux):
 curl -L -o android-jar/android.jar \
   https://github.com/Termux-user-organization/android-jar/raw/main/android-28/android.jar
 
+sh build.sh                 # compila, alinea y firma (usa la keystore del repo si existe)
+sh build.sh 3.0.15 copiar   # además copia el APK a /storage/emulated/0/MT2/apks/
+```
+
+O a mano, paso a paso:
+
+```bash
 cd app
 aapt package -f -m -M AndroidManifest.xml -S res -A assets -I ../android-jar/android.jar -J gen
-ecj -nowarn -d ../out/classes src gen
-cd ../out
-dx --dex --min-sdk-version=24 --output=classes.dex classes
+ecj -nowarn -classpath ../libs/zxing-core-3.3.3.jar -d ../out/classes src gen
+cd ../out && jar cf classes.jar -C classes .
+d8 --lib ../android-jar/android.jar --min-api 24 --release --output dexdir classes.jar ../libs/zxing-core-3.3.3.jar
 aapt package -f -M ../app/AndroidManifest.xml -S ../app/res -A ../app/assets \
   -I ../android-jar/android.jar -F unsigned.apk
-aapt add unsigned.apk classes.dex
+aapt add unsigned.apk dexdir/classes.dex   # el dex va EN LA RAÍZ del APK
 # Genera tu propia keystore:
 keytool -genkeypair -keystore mi-keystore.keystore -alias app -keyalg RSA -validity 10000
-apksigner sign --ks mi-keystore.keystore --out SuperCambio.apk unsigned.apk
+zipalign -f 4 unsigned.apk aligned.apk
+apksigner sign --ks mi-keystore.keystore --out SuperCambio.apk aligned.apk
 ```
 
 ### 🧪 Pruebas

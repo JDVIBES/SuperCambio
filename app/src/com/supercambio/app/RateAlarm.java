@@ -35,6 +35,8 @@ public class RateAlarm extends BroadcastReceiver {
                 try {
                     fetchLatest(ctx);
                     push(ctx);
+                    // La alarma es exacta y no se repite sola: se rearma para el día siguiente.
+                    schedule(ctx, true);
                 } finally {
                     // finish() SIEMPRE: si no, el sistema mata la app por timeout del broadcast.
                     if (pr != null) pr.finish();
@@ -50,18 +52,42 @@ public class RateAlarm extends BroadcastReceiver {
             Intent it = new Intent(ctx, RateAlarm.class);
             PendingIntent pi = PendingIntent.getBroadcast(ctx, 1001, it, 0x0C000000);
             if (enable) {
-                TimeZone tz = TimeZone.getTimeZone("America/Caracas");
-                Calendar cal = Calendar.getInstance(tz);
-                cal.set(Calendar.HOUR_OF_DAY, 15);
-                cal.set(Calendar.MINUTE, 35);
-                cal.set(Calendar.SECOND, 0);
-                cal.set(Calendar.MILLISECOND, 0);
-                if (cal.getTimeInMillis() <= System.currentTimeMillis()) cal.add(Calendar.DAY_OF_YEAR, 1);
-                am.setRepeating(AlarmManager.RTC_WAKEUP, cal.getTimeInMillis(), AlarmManager.INTERVAL_DAY, pi);
+                long next = nextSlot();
+                // Alarma EXACTA: desde Android 6 el sistema agrupa las alarmas repetidas y el
+                // aviso de las 15:35 llegaba tarde (o se aplazaba en Doze).
+                try {
+                    if (Build.VERSION.SDK_INT >= 23) {
+                        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi);
+                    } else {
+                        am.setExact(AlarmManager.RTC_WAKEUP, next, pi);
+                    }
+                } catch (Exception e) {
+                    // Si el usuario quitó el permiso de "alarmas y recordatorios": alarma
+                    // repetida (puede llegar tarde, pero el aviso llega).
+                    am.setRepeating(AlarmManager.RTC_WAKEUP, next, AlarmManager.INTERVAL_DAY, pi);
+                }
             } else {
                 am.cancel(pi);
             }
         } catch (Exception ignored) { }
+    }
+
+    // Próximo 15:35 de Caracas (día hábil).
+    private static long nextSlot() {
+        TimeZone tz = TimeZone.getTimeZone("America/Caracas");
+        Calendar cal = Calendar.getInstance(tz);
+        cal.set(Calendar.HOUR_OF_DAY, 15);
+        cal.set(Calendar.MINUTE, 35);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+        long now = System.currentTimeMillis();
+        if (cal.getTimeInMillis() <= now) cal.add(Calendar.DAY_OF_YEAR, 1);
+        // si cae en fin de semana, se pasa al lunes
+        while (cal.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY
+                || cal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY) {
+            cal.add(Calendar.DAY_OF_YEAR, 1);
+        }
+        return cal.getTimeInMillis();
     }
 
     static void push(Context ctx) {
@@ -106,35 +132,61 @@ public class RateAlarm extends BroadcastReceiver {
     }
 
     private static void fetchLatest(Context ctx) {
+        SharedPreferences p = ctx.getSharedPreferences("supercambio", Context.MODE_PRIVATE);
+        SharedPreferences.Editor e = p.edit();
         try {
-            String s = httpGetS("https://ve.dolarapi.com/v1/dolares");
-            JSONArray arr = new JSONArray(s);
-            SharedPreferences p = ctx.getSharedPreferences("supercambio", Context.MODE_PRIVATE);
-            SharedPreferences.Editor e = p.edit();
-            try {
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject o = arr.optJSONObject(i);
-                    if (o == null) continue;
-                    String fu = o.optString("fuente", "");
-                    double v = o.optDouble("promedio", 0);
-                    long t = tsOfS(o);
-                    if (v <= 0) continue;
-                    if ("oficial".equals(fu)) {
-                        // Solo si es MÁS NUEVO que lo guardado: una réplica vieja del API no
-                        // puede pisar la tasa que el usuario ya tenía.
-                        if (t > 0 && t <= p.getLong("tsUsd", 0)) continue;
-                        e.putLong("usd", Double.doubleToRawLongBits(v));
-                        if (t > 0) e.putLong("tsUsd", t);
-                    } else if ("paralelo".equals(fu)) {
-                        if (t > 0 && t <= p.getLong("tsPar", 0)) continue;
-                        e.putLong("par", Double.doubleToRawLongBits(v));
-                        if (t > 0) e.putLong("tsPar", t);
-                    }
+            // USD: oficial y paralelo
+            JSONArray arr = new JSONArray(httpGetS("https://ve.dolarapi.com/v1/dolares"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String fu = o.optString("fuente", "");
+                double v = o.optDouble("promedio", 0);
+                long t = tsOfS(o);
+                if (v <= 0) continue;
+                if ("oficial".equals(fu)) {
+                    // Solo si es MÁS NUEVO que lo guardado: una réplica vieja del API no
+                    // puede pisar la tasa que el usuario ya tenía.
+                    if (t > 0 && t <= p.getLong("tsUsd", 0)) continue;
+                    e.putLong("usd", Double.doubleToRawLongBits(v));
+                    if (t > 0) e.putLong("tsUsd", t);
+                } else if ("paralelo".equals(fu)) {
+                    if (t > 0 && t <= p.getLong("tsPar", 0)) continue;
+                    e.putLong("par", Double.doubleToRawLongBits(v));
+                    if (t > 0) e.putLong("tsPar", t);
                 }
-            } finally {
-                // Aunque un elemento venga mal, se guarda lo que sí se pudo leer.
-                e.apply();
             }
+        } catch (Exception ignored) { }
+        try {
+            // EUR oficial: sin esto el widget "Completo" mostraba el euro VIEJO junto a la
+            // hora nueva del dólar.
+            JSONArray arr = new JSONArray(httpGetS("https://ve.dolarapi.com/v1/euros"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                if (!"oficial".equals(o.optString("fuente", ""))) continue;
+                double v = o.optDouble("promedio", 0);
+                long t = tsOfS(o);
+                if (v <= 0) continue;
+                if (t > 0 && t <= p.getLong("tsEur", 0)) continue;
+                e.putLong("eur", Double.doubleToRawLongBits(v));
+                if (t > 0) e.putLong("tsEur", t);
+            }
+        } catch (Exception ignored) { }
+        try {
+            // USDT (Binance P2P)
+            JSONObject c = new JSONObject(httpGetS("https://criptoya.com/api/USDT/VES/1"));
+            JSONObject bin = c.getJSONObject("binancep2p");
+            double bid = bin.optDouble("bid", 0);
+            long t = bin.optLong("time", 0) * 1000L;
+            if (bid > 0 && (t <= 0 || t > p.getLong("tsUsdt", 0))) {
+                e.putLong("usdt", Double.doubleToRawLongBits(bid));
+                if (t > 0) e.putLong("tsUsdt", t);
+            }
+        } catch (Exception ignored) { }
+        try {
+            // Aunque un bloque falle, se guarda lo que sí se pudo leer.
+            e.apply();
         } catch (Exception ignored) { }
     }
 
