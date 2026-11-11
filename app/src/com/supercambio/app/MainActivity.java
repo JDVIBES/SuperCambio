@@ -119,7 +119,9 @@ public class MainActivity extends Activity {
     private static final int REQ_INSTALL = 4001;
     private static final int REQ_PICK_JSON = 5001;
     private static final int REQ_SAVE_JSON = 5002;
+    private static final int REQ_SAVE_CSV = 5003;
     private boolean langEn = false;
+    private boolean widgetClear = false;
     private boolean dailyNotif = false;
 
     private double bcvUsd, bcvEur, usdt, paralelo;
@@ -181,6 +183,7 @@ public class MainActivity extends Activity {
         dailyNotif = p.getBoolean("daily_notif", false);
         accentIdx = p.getInt("accent_idx", 0);
         langEn = p.getBoolean("lang_en", false);
+        widgetClear = p.getBoolean("widget_clear", false);
         updTag = p.getString("upd_tag", "");
         updUrl = p.getString("upd_url", "");
         updNotes = p.getString("upd_notes", "");
@@ -430,6 +433,7 @@ public class MainActivity extends Activity {
         e.putBoolean("daily_notif", dailyNotif);
         e.putInt("accent_idx", accentIdx);
         e.putBoolean("lang_en", langEn);
+        e.putBoolean("widget_clear", widgetClear);
         e.putLong("usd", Double.doubleToRawLongBits(bcvUsd));
         e.putLong("eur", Double.doubleToRawLongBits(bcvEur));
         e.putLong("usdt", Double.doubleToRawLongBits(usdt));
@@ -993,6 +997,51 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Exporta el historial de tasas a CSV vía SAF (Excel / Google Sheets)
+    private void exportHistoryCsv() {
+        try {
+            Intent it = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            it.addCategory(Intent.CATEGORY_OPENABLE);
+            it.setType("text/csv");
+            it.putExtra(Intent.EXTRA_TITLE, "historial_super_cambio.csv");
+            startActivityForResult(it, REQ_SAVE_CSV);
+        } catch (Exception e) {
+            Toast.makeText(this, S("No se encontró un gestor de archivos", "No file manager found"), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void appendCsv(StringBuilder sb, String name, JSONArray h) {
+        if (h == null) return;
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", new java.util.Locale("es", "VE"));
+        df.setTimeZone(java.util.TimeZone.getTimeZone("America/Caracas"));
+        try {
+            for (int i = 0; i < h.length(); i++) {
+                JSONObject o = h.getJSONObject(i);
+                sb.append(name.replace(",", " ")).append(',')
+                  .append('"').append(df.format(new java.util.Date(o.optLong("t")))).append('"').append(',')
+                  .append(String.format(java.util.Locale.US, "%.4f", o.optDouble("v", 0))).append('\n');
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void writeHistoryCsv(Uri uri) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("tasa,fecha,valor_bs\n");
+            appendCsv(sb, S("Dólar BCV", "BCV Dollar"), histUsd);
+            appendCsv(sb, S("Dólar paralelo", "Parallel dollar"), histPar);
+            appendCsv(sb, S("Euro BCV", "BCV Euro"), histEur);
+            appendCsv(sb, "USDT", histUsdt);
+            java.io.OutputStream os = getContentResolver().openOutputStream(uri);
+            if (os == null) throw new Exception("stream");
+            os.write(sb.toString().getBytes("UTF-8"));
+            os.close();
+            Toast.makeText(this, S("✅ Historial exportado", "✅ History exported"), Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, S("No se pudo guardar el CSV", "Couldn't save the CSV"), Toast.LENGTH_SHORT).show();
+        }
+    }
+
     // Valida y aplica un respaldo JSON de perfiles: {"perfiles":[...]} o array crudo
     private void applyImportJson(String raw) {
         try {
@@ -1030,6 +1079,7 @@ public class MainActivity extends Activity {
         ScrollView root;
         LinearLayout list;
         TextView empty;
+        EditText search;
 
         PageProfiles() {
             root = new ScrollView(MainActivity.this);
@@ -1088,6 +1138,25 @@ public class MainActivity extends Activity {
                 public void onClick(View v) { importProfiles(); }
             });
 
+            // Buscar/filtrar perfiles
+            search = new EditText(MainActivity.this);
+            search.setSingleLine(true);
+            search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            search.setTypeface(TF_REG);
+            search.setTextColor(col("text_primary"));
+            search.setHintTextColor(col("text_secondary"));
+            search.setHint(S("🔍  Buscar perfiles…", "🔍  Search profiles…"));
+            search.setBackground(rounded(col("input_bg"), 14));
+            search.setPadding(dp(14), dp(11), dp(14), dp(11));
+            LinearLayout.LayoutParams seLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            seLp.setMargins(0, dp(12), 0, 0);
+            box.addView(search, seLp);
+            search.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+                public void onTextChanged(CharSequence s, int a, int b, int c) { }
+                public void afterTextChanged(Editable s) { refresh(); }
+            });
+
             list = new LinearLayout(MainActivity.this);
             list.setOrientation(LinearLayout.VERTICAL);
             box.addView(list);
@@ -1103,14 +1172,39 @@ public class MainActivity extends Activity {
         void refresh() {
             list.removeAllViews();
             JSONArray arr = loadProfiles();
-            empty.setVisibility(arr.length() == 0 ? View.VISIBLE : View.GONE);
+            if (search != null) search.setVisibility(arr.length() == 0 ? View.GONE : View.VISIBLE);
+            String q = search != null ? search.getText().toString().trim().toLowerCase() : "";
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMargins(0, dp(10), 0, 0);
+            int shown = 0;
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject o = arr.optJSONObject(i);
-                if (o != null) list.addView(profileCard(o, i), lp);
+                if (o == null) continue;
+                if (q.length() > 0 && !profileMatches(o, q)) continue;
+                list.addView(profileCard(o, i), lp);
+                shown++;
             }
+            if (shown == 0 && q.length() > 0) {
+                empty.setText(S("🔍 Sin resultados para tu búsqueda.", "🔍 No results for your search."));
+            } else {
+                empty.setText(S("💳 Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "💳 No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."));
+            }
+            empty.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
             nudgeBlur();
+        }
+
+        // Coincidencia por nombre de tipo, insignia o cualquier campo (sin mayúsculas)
+        private boolean profileMatches(JSONObject o, String q) {
+            int t = typeIndexOf(o.optString("t", "pmov"));
+            if (ptName(t).toLowerCase().contains(q) || PAY_TYPES[t][2].toLowerCase().contains(q)) return true;
+            JSONObject v = o.optJSONObject("v");
+            if (v == null) return false;
+            String[] fields = PAY_TYPES[t][4].split("\u0001");
+            for (int i = 0; i < fields.length; i++) {
+                String val = v.optString(fields[i], "");
+                if (val.length() > 0 && val.toLowerCase().contains(q)) return true;
+            }
+            return false;
         }
 
         View profileCard(final JSONObject o, final int idx) {
@@ -1151,6 +1245,18 @@ public class MainActivity extends Activity {
             clp.setMargins(dp(12), 0, dp(8), 0);
             card.addView(col, clp);
 
+            // Botón QR: comparte el perfil como código QR escaneable
+            ImageView qb = new ImageView(MainActivity.this);
+            qb.setImageResource(R.drawable.ic_qr);
+            qb.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
+            qb.setBackground(rounded(col("input_bg"), 20));
+            qb.setPadding(dp(9), dp(9), dp(9), dp(9));
+            qb.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View vv) { shareQr(idx); }
+            });
+            card.addView(qb, new LinearLayout.LayoutParams(dp(38), dp(38)));
+            ((LinearLayout.LayoutParams) qb.getLayoutParams()).setMargins(0, 0, dp(8), 0);
+
             // Botón compartir: genera imagen con logo y nombre de la app
             ImageView sh = new ImageView(MainActivity.this);
             sh.setImageResource(R.drawable.ic_share);
@@ -1166,10 +1272,59 @@ public class MainActivity extends Activity {
                 public void onClick(View view) { showEdit(t, idx); }
             });
             card.setOnLongClickListener(new View.OnLongClickListener() {
-                public boolean onLongClick(View view) { confirmDelete(idx); return true; }
+                public boolean onLongClick(View view) { profileOptions(idx); return true; }
             });
             return pressScale(card);
         }
+    }
+
+    // ================= OPCIONES DE PERFIL (mover / eliminar) =================
+
+    // Long-press en la tarjeta: mover arriba/abajo o eliminar
+    private void profileOptions(final int idx) {
+        JSONArray arr = loadProfiles();
+        if (idx < 0 || idx >= arr.length()) return;
+        JSONObject o = arr.optJSONObject(idx);
+        int t = typeIndexOf(o != null ? o.optString("t", "pmov") : "pmov");
+        final LinearLayout c = sheet(S("Opciones · ", "Options · ") + ptName(t));
+        if (idx > 0) {
+            TextView up = tv(S("▲  Mover arriba", "▲  Move up"), 15, true, col("accent"));
+            up.setPadding(dp(4), dp(14), dp(4), dp(14));
+            up.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { closeSheet(); moveProfile(idx, -1); }
+            });
+            c.addView(up);
+        }
+        if (idx < arr.length() - 1) {
+            TextView down = tv(S("▼  Mover abajo", "▼  Move down"), 15, true, col("accent"));
+            down.setPadding(dp(4), dp(14), dp(4), dp(14));
+            down.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { closeSheet(); moveProfile(idx, 1); }
+            });
+            c.addView(down);
+        }
+        TextView del = tv(S("🗑  Eliminar perfil", "🗑  Delete profile"), 15, true, col("red"));
+        del.setPadding(dp(4), dp(14), dp(4), dp(4));
+        del.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { closeSheet(); confirmDelete(idx); }
+        });
+        c.addView(del);
+    }
+
+    // Intercambia el perfil idx con su vecino (dir = -1 arriba, +1 abajo)
+    private void moveProfile(int idx, int dir) {
+        JSONArray a = loadProfiles();
+        int j = idx + dir;
+        if (idx < 0 || idx >= a.length() || j < 0 || j >= a.length()) return;
+        JSONObject me = a.optJSONObject(idx);
+        JSONObject other = a.optJSONObject(j);
+        if (me == null || other == null) return;
+        try {
+            a.put(idx, other);
+            a.put(j, me);
+            saveProfiles(a);
+            Toast.makeText(this, S("▲ Orden actualizado", "▲ Order updated"), Toast.LENGTH_SHORT).show();
+        } catch (Exception ignored) { }
     }
 
     // ================= COMPARTIR PERFIL (imagen con marca) =================
@@ -1324,7 +1479,80 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ================= COMPARTIR PERFIL COMO QR (zxing, 100% local) =================
+
+    private void shareQr(int idx) {
+        JSONArray arr = loadProfiles();
+        if (idx < 0 || idx >= arr.length()) return;
+        JSONObject o = arr.optJSONObject(idx);
+        if (o == null) return;
+        int t = typeIndexOf(o.optString("t", "pmov"));
+        String[] fields = PAY_TYPES[t][4].split("\u0001");
+        JSONObject v = o.optJSONObject("v");
+        if (v == null) v = new JSONObject();
+
+        // Texto legible que vivirá dentro del QR
+        StringBuilder txt = new StringBuilder(ptName(t)).append("\n");
+        for (int i = 0; i < fields.length; i++) {
+            String val = v.optString(fields[i], "").trim();
+            if (!val.isEmpty()) txt.append(ptField(t, i)).append(": ").append(val).append("\n");
+        }
+        txt.append("\n").append(S("Enviado con Super Cambio", "Sent with Super Cambio"));
+
+        try {
+            com.google.zxing.qrcode.QRCodeWriter w = new com.google.zxing.qrcode.QRCodeWriter();
+            java.util.Map<com.google.zxing.EncodeHintType, Object> hints =
+                    new java.util.HashMap<com.google.zxing.EncodeHintType, Object>();
+            hints.put(com.google.zxing.EncodeHintType.CHARACTER_SET, "UTF-8");
+            com.google.zxing.common.BitMatrix mx =
+                    w.encode(txt.toString(), com.google.zxing.BarcodeFormat.QR_CODE, 900, 900, hints);
+
+            int size = 900;
+            int[] px = new int[size * size];
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    px[y * size + x] = mx.get(x, y) ? 0xFF111114 : 0xFFFFFFFF;
+                }
+            }
+            Bitmap qr = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            qr.setPixels(px, 0, size, 0, 0, size, size);
+
+            File f = new File(getCacheDir(), "perfil_qr.png");
+            FileOutputStream fo = new FileOutputStream(f);
+            qr.compress(Bitmap.CompressFormat.PNG, 100, fo);
+            fo.close();
+            qr.recycle();
+
+            Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/perfil_qr.png");
+            Intent it = new Intent(Intent.ACTION_SEND);
+            it.setType("image/png");
+            it.putExtra(Intent.EXTRA_STREAM, uri);
+            it.putExtra(Intent.EXTRA_TEXT, txt.toString());
+            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(it, S("Compartir QR", "Share QR")));
+        } catch (Exception e) {
+            Toast.makeText(this, S("No se pudo generar el QR", "Couldn't generate the QR"), Toast.LENGTH_SHORT).show();
+        }
+    }
+
     // ================= COMPARTIR TASAS (imagen con marca) =================
+
+    // Copiar el bloque completo de tasas (lo que se ve en pantalla) al portapapeles
+    private void copyAllRates() {
+        if (bcvUsd <= 0 && paralelo <= 0 && bcvEur <= 0 && usdt <= 0) {
+            Toast.makeText(this, S("Aún no hay datos para copiar", "No data to copy yet"), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        if (bcvUsd > 0) sb.append(S("Dólar BCV", "BCV Dollar")).append(": ").append(fmt(bcvUsd)).append(" Bs.\n");
+        if (paralelo > 0) sb.append(S("Dólar paralelo", "Parallel dollar")).append(": ").append(fmt(paralelo)).append(" Bs.\n");
+        if (bcvEur > 0) sb.append(S("Euro BCV", "BCV Euro")).append(": ").append(fmt(bcvEur)).append(" Bs.\n");
+        if (usdt > 0) sb.append("USDT: ").append(fmt(usdt)).append(" Bs.\n");
+        java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("d MMM, HH:mm", new java.util.Locale("es", "VE"));
+        df.setTimeZone(java.util.TimeZone.getTimeZone("America/Caracas"));
+        sb.append("\n").append(df.format(new java.util.Date()));
+        copyClip("Tasas", sb.toString().trim(), null);
+    }
 
     private void shareRates() {
         if (bcvUsd <= 0 && paralelo <= 0 && bcvEur <= 0 && usdt <= 0) {
@@ -1609,6 +1837,18 @@ public class MainActivity extends Activity {
 
             status = tvIos(S("⏳ Sin datos todavía", "⏳ No data yet"), 13, false, col("text_secondary"));
             statusRow.addView(status, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+            // Copiar todas las tasas de golpe
+            ImageView copyBtn = new ImageView(MainActivity.this);
+            copyBtn.setImageResource(R.drawable.ic_copy);
+            copyBtn.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
+            copyBtn.setBackground(rounded(col("input_bg"), 20));
+            copyBtn.setPadding(dp(9), dp(9), dp(9), dp(9));
+            copyBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { copyAllRates(); }
+            });
+            statusRow.addView(copyBtn, new LinearLayout.LayoutParams(dp(38), dp(38)));
+            ((LinearLayout.LayoutParams) copyBtn.getLayoutParams()).setMargins(0, 0, dp(10), 0);
 
             // Compartir tasas como imagen con marca
             ImageView shareBtn = new ImageView(MainActivity.this);
@@ -2549,8 +2789,8 @@ public class MainActivity extends Activity {
     private class PageConv {
         ScrollView root;
         LinearLayout segWrap;
-        EditText input;
-        TextView result, labelFrom, labelTo;
+        EditText input, feeInput;
+        TextView result, labelFrom, labelTo, feeDetail;
         int mode = 0;
         boolean invert = false;
 
@@ -2700,6 +2940,49 @@ public class MainActivity extends Activity {
                 });
             }
 
+            // Comisión % opcional: se descuenta del resultado y se muestra desglosada
+            LinearLayout feeRow = new LinearLayout(MainActivity.this);
+            feeRow.setOrientation(LinearLayout.HORIZONTAL);
+            feeRow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams frLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            frLp.setMargins(0, dp(12), 0, 0);
+            card.addView(feeRow, frLp);
+
+            TextView feeLbl = tv(S("Comisión %", "Fee %"), 13, false, col("text_secondary"));
+            feeLbl.setPadding(dp(4), 0, dp(10), 0);
+            feeRow.addView(feeLbl, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            feeInput = new EditText(MainActivity.this);
+            feeInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+            feeInput.setBackground(rounded(col("input_bg"), 14));
+            feeInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            feeInput.setTextColor(col("text_primary"));
+            feeInput.setTypeface(TF_MED);
+            feeInput.setHint("0");
+            feeInput.setHintTextColor(col("text_secondary"));
+            feeInput.setPadding(dp(12), dp(9), dp(12), dp(9));
+            feeInput.setText(getSharedPreferences(PREFS, MODE_PRIVATE).getString("conv_fee", ""));
+            feeRow.addView(feeInput, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+            TextView feeTip = tv(S("del resultado", "of result"), 12, false, col("text_secondary"));
+            feeTip.setPadding(dp(10), 0, dp(4), 0);
+            feeRow.addView(feeTip, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            feeDetail = tv("", 12, false, col("text_secondary"));
+            feeDetail.setVisibility(View.GONE);
+            LinearLayout.LayoutParams fdLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            fdLp.setMargins(dp(4), dp(8), 0, 0);
+            card.addView(feeDetail, fdLp);
+
+            feeInput.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+                public void onTextChanged(CharSequence s, int a, int b, int c) { }
+                public void afterTextChanged(Editable s) {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("conv_fee", s.toString()).apply();
+                    recompute();
+                }
+            });
+
             // Compartir el resultado de la conversión
             Button convShare = new Button(MainActivity.this);
             convShare.setText(S("Compartir resultado", "Share result"));
@@ -2768,16 +3051,59 @@ public class MainActivity extends Activity {
             double rate = rateSel();
             String sym = mode == 1 ? "EUR" : mode == 0 ? "USD" : "USDT";
             double amt = parseAmount(input.getText().toString());
+            double fee = feePct();
+            boolean hasFee = fee > 0 && rate > 0 && amt > 0;
             if (invert) {
                 labelFade(labelFrom, S("Monto en Bs.", "Amount in Bs."));
                 labelFade(labelTo, S("Resultado en ", "Result in ") + sym);
-                if (rate > 0 && amt > 0) setResultAnimated(fmt(amt / rate));
-                else setResultAnimated("—");
+                if (rate > 0 && amt > 0) {
+                    double res = amt / rate;
+                    if (hasFee) {
+                        double feeAmt = res * fee / 100.0;
+                        setResultAnimated(fmt(res - feeAmt) + " " + sym);
+                    } else {
+                        setResultAnimated(fmt(res) + " " + sym);
+                    }
+                } else {
+                    setResultAnimated("—");
+                }
             } else {
                 labelFade(labelFrom, fromNames[mode]);
                 labelFade(labelTo, S("Resultado en Bs.", "Result in Bs."));
-                if (rate > 0 && amt > 0) setResultAnimated(fmt(amt * rate) + " Bs.");
-                else setResultAnimated("—");
+                if (rate > 0 && amt > 0) {
+                    double res = amt * rate;
+                    if (hasFee) {
+                        double feeAmt = res * fee / 100.0;
+                        setResultAnimated(fmt(res - feeAmt) + " Bs.");
+                    } else {
+                        setResultAnimated(fmt(res) + " Bs.");
+                    }
+                } else {
+                    setResultAnimated("—");
+                }
+            }
+            if (hasFee && feeDetail != null) {
+                double res = invert ? amt / rate : amt * rate;
+                double feeAmt = res * fee / 100.0;
+                String unit = invert ? " " + sym : " Bs.";
+                feeDetail.setText(S("Comisión ", "Fee ") + fmt(fee) + "%: −" + fmt(feeAmt) + unit
+                        + S(" · Bruto: ", " · Gross: ") + fmt(res) + unit);
+                feeDetail.setVisibility(View.VISIBLE);
+            } else if (feeDetail != null) {
+                feeDetail.setText("");
+                feeDetail.setVisibility(View.GONE);
+            }
+        }
+
+        // Comisión escrita por el usuario (0–99, admite coma decimal)
+        private double feePct() {
+            try {
+                double f = Double.parseDouble(feeInput.getText().toString().trim().replace(",", "."));
+                if (f < 0) return 0;
+                if (f > 99) return 99;
+                return f;
+            } catch (Exception e) {
+                return 0;
             }
         }
 
@@ -2789,10 +3115,19 @@ public class MainActivity extends Activity {
                 return;
             }
             String sym = mode == 1 ? "EUR" : mode == 0 ? "USD" : "USDT";
+            double fee = feePct();
+            boolean hasFee = fee > 0;
+            double resVal = invert ? amt / rate : amt * rate;
+            double feeAmt = hasFee ? resVal * fee / 100.0 : 0;
+            double net = resVal - feeAmt;
+            String unit = invert ? " " + sym : " Bs.";
             String montoTxt = invert ? fmt(amt) + " Bs." : fmt(amt) + " " + sym;
-            String resTxt = invert ? fmt(amt / rate) + " " + sym : fmt(amt * rate) + " Bs.";
+            String resTxt = fmt(net) + unit;
             String tasaTxt = S("Tasa: ", "Rate: ") + fmt(rate) + S(" Bs. por ", " Bs. per ") + sym
                     + " · " + (mode == 2 ? "Binance P2P" : "BCV");
+            String feeTxt = hasFee
+                    ? S("Comisión ", "Fee ") + fmt(fee) + "%: −" + fmt(feeAmt) + unit + S(" · Bruto: ", " · Gross: ") + fmt(resVal) + unit
+                    : null;
 
             boolean dk = isDark();
             int bgCol = dk ? 0xFF0E0E10 : 0xFFF2F3F7;
@@ -2801,7 +3136,8 @@ public class MainActivity extends Activity {
             int secCol = dk ? 0xFF98989F : 0xFF8E8E93;
             int accCol = col("accent");
 
-            int W = 1000, pad = 56, headH = 200, bodyH = 380, footH = 130;
+            int W = 1000, pad = 56, headH = 200, footH = 130;
+            int bodyH = hasFee ? 450 : 380;
             int H = pad + headH + bodyH + footH;
             float maxW = W - 2 * pad - 40;
 
@@ -2846,7 +3182,15 @@ public class MainActivity extends Activity {
             cv.drawText(montoTxt, W / 2f, siBase(montoP, y0 + 90), montoP);
             cv.drawText("↓", W / 2f, siBase(arrowP, y0 + 176), arrowP);
             cv.drawText(resTxt, W / 2f, siBase(resP, y0 + 264), resP);
-            cv.drawText(tasaTxt, W / 2f, siBase(tasaP, y0 + 352), tasaP);
+            if (hasFee) {
+                Paint feeP = siLight(secCol, 30);
+                feeP.setTextAlign(Paint.Align.CENTER);
+                siFit(feeP, feeTxt, maxW);
+                cv.drawText(feeTxt, W / 2f, siBase(feeP, y0 + 336), feeP);
+                cv.drawText(tasaTxt, W / 2f, siBase(tasaP, y0 + 416), tasaP);
+            } else {
+                cv.drawText(tasaTxt, W / 2f, siBase(tasaP, y0 + 352), tasaP);
+            }
 
             Paint footP = siLight(secCol, 30);
             footP.setTextAlign(Paint.Align.CENTER);
@@ -2859,7 +3203,9 @@ public class MainActivity extends Activity {
                 fo.close();
                 bmp.recycle();
 
-                String txt = montoTxt + " = " + resTxt + "\n" + tasaTxt + "\n\n" + S("Enviado con Super Cambio", "Sent with Super Cambio");
+                String txt = montoTxt + " = " + resTxt + "\n"
+                        + (hasFee ? feeTxt + "\n" : "")
+                        + tasaTxt + "\n\n" + S("Enviado con Super Cambio", "Sent with Super Cambio");
                 Uri uri = Uri.parse("content://" + ShareProvider.AUTHORITY + "/conversion.png");
                 Intent it = new Intent(Intent.ACTION_SEND);
                 it.setType("image/png");
@@ -3080,6 +3426,36 @@ public class MainActivity extends Activity {
         });
         hapRow.addView(hapSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // Widget transparente (se funde con el fondo de pantalla)
+        rowSep(themeCard);
+        LinearLayout wgRow = new LinearLayout(this);
+        wgRow.setOrientation(LinearLayout.HORIZONTAL);
+        wgRow.setGravity(Gravity.CENTER_VERTICAL);
+        wgRow.setPadding(0, dp(12), 0, dp(12));
+        themeCard.addView(wgRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout wgCol = new LinearLayout(this);
+        wgCol.setOrientation(LinearLayout.VERTICAL);
+        wgRow.addView(wgCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        wgCol.addView(tv(S("Widget transparente", "Transparent widget"), 15, false, col("text_primary")));
+        wgCol.addView(tv(S("Fondo traslúcido que se funde con tu pantalla", "Translucent background that blends in"), 13, false, col("text_secondary")));
+        Switch wgSwitch = new Switch(this);
+        wgSwitch.setChecked(widgetClear);
+        try {
+            wgSwitch.setThumbTintList(android.content.res.ColorStateList.valueOf(col("accent")));
+            int[][] wstates = new int[][]{ new int[]{android.R.attr.state_checked}, new int[]{} };
+            int[] wcolors = new int[]{ col("accent"), col("separator") };
+            wgSwitch.setTrackTintList(new android.content.res.ColorStateList(wstates, wcolors));
+        } catch (Exception ignored) { }
+        wgSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                widgetClear = checked;
+                saveAll();
+                RateWidget.push(MainActivity.this);
+                Toast.makeText(MainActivity.this, checked ? S("Widget transparente activado", "Transparent widget on") : S("Widget transparente desactivado", "Transparent widget off"), Toast.LENGTH_SHORT).show();
+            }
+        });
+        wgRow.addView(wgSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         // Idioma — sección dedicada
         box.addView(sectionLabel(S("Idioma", "Language")));
         LinearLayout langCard = card(box);
@@ -3127,6 +3503,18 @@ public class MainActivity extends Activity {
         rowLink(dataCard, "USDT Binance P2P", "criptoya.com", "https://criptoya.com");
         rowSep(dataCard);
         rowInfo(dataCard, S("Paralelo", "Parallel dollar"), S("Promedio de mercado (dolarAPI)", "Market average (dolarAPI)"), false);
+
+        box.addView(sectionLabel(S("Datos y respaldo", "Data & backup")));
+        LinearLayout csvCard = card(box);
+        LinearLayout csvRow = rowBase(csvCard,
+                S("Exportar historial (CSV)", "Export history (CSV)"),
+                S("Abre tus tasas guardadas en Excel o Google Sheets", "Open your saved rates in Excel or Google Sheets"),
+                false);
+        csvRow.setClickable(true);
+        pressScale(csvRow);
+        csvRow.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { haptic(v); exportHistoryCsv(); }
+        });
 
         box.addView(sectionLabel(S("Privacidad y rendimiento", "Privacy & performance")));
         LinearLayout privCard = card(box);
@@ -3786,6 +4174,9 @@ public class MainActivity extends Activity {
             } finally {
                 if (out != null) { try { out.close(); } catch (Exception ignored) { } }
             }
+        }
+        if (requestCode == REQ_SAVE_CSV && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            writeHistoryCsv(data.getData());
         }
     }
 

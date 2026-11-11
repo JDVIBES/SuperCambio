@@ -35,8 +35,12 @@ public class RateWidget extends AppWidgetProvider {
             it.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             PendingIntent pi = PendingIntent.getActivity(ctx, 3001, it, 0x0C000000);
 
+            boolean clear = p.getBoolean("widget_clear", false);
+            int bg = clear ? R.drawable.widget_bg_clear : R.drawable.widget_bg;
+
             // Mediano: BCV / Paralelo / Euro
             RemoteViews rv = new RemoteViews(ctx.getPackageName(), R.layout.widget_rates);
+            rv.setInt(R.id.widget_root, "setBackgroundResource", bg);
             rv.setTextViewText(R.id.w_usd, usd > 0 ? f(usd) : "—");
             rv.setTextViewText(R.id.w_par, par > 0 ? f(par) : "—");
             rv.setTextViewText(R.id.w_eur, eur > 0 ? f(eur) : "—");
@@ -46,6 +50,7 @@ public class RateWidget extends AppWidgetProvider {
 
             // Mini 1x1: solo BCV
             RemoteViews sv = new RemoteViews(ctx.getPackageName(), R.layout.widget_single);
+            sv.setInt(R.id.ws_root, "setBackgroundResource", bg);
             sv.setTextViewText(R.id.ws_val, usd > 0 ? f(usd) : "—");
             sv.setTextViewText(R.id.ws_time, t);
             sv.setOnClickPendingIntent(R.id.ws_root, pi);
@@ -53,6 +58,7 @@ public class RateWidget extends AppWidgetProvider {
 
             // Chico 2x1: BCV + Paralelo
             RemoteViews mv = new RemoteViews(ctx.getPackageName(), R.layout.widget_small);
+            mv.setInt(R.id.wm_root, "setBackgroundResource", bg);
             mv.setTextViewText(R.id.wm_usd, usd > 0 ? f(usd) : "—");
             mv.setTextViewText(R.id.wm_par, par > 0 ? f(par) : "—");
             mv.setTextViewText(R.id.wm_time, "Actualizado: " + t);
@@ -61,6 +67,7 @@ public class RateWidget extends AppWidgetProvider {
 
             // Completo: las 4 tasas
             RemoteViews lv = new RemoteViews(ctx.getPackageName(), R.layout.widget_large);
+            lv.setInt(R.id.wl_root, "setBackgroundResource", bg);
             lv.setTextViewText(R.id.wl_usd, usd > 0 ? f(usd) : "—");
             lv.setTextViewText(R.id.wl_par, par > 0 ? f(par) : "—");
             lv.setTextViewText(R.id.wl_usdt, usdt > 0 ? f(usdt) : "—");
