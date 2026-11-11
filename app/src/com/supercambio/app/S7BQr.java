@@ -172,6 +172,32 @@ public final class S7BQr {
         return null;
     }
 
+    public static boolean bankMatches(String code, String name, String query) {
+        String q = normalizeName(query == null ? "" : query);
+        if (q.length() == 0) {
+            return true;
+        }
+        String c = code == null ? "" : code.trim();
+        if (c.contains(q)) {
+            return true;
+        }
+        String n = normalizeName(name == null ? "" : name);
+        if (n.contains(q)) {
+            return true;
+        }
+        for (int i = 0; i < ALIASES.length; i++) {
+            if (!ALIASES[i][0].equals(c)) {
+                continue;
+            }
+            for (int j = 1; j < ALIASES[i].length; j++) {
+                if (normalizeName(ALIASES[i][j]).contains(q)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public static String bankName(String value) {
         String code = codeFor(value);
         if (code == null) {

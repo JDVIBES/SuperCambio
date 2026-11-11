@@ -930,14 +930,59 @@ public class MainActivity extends Activity {
         int p = dp(20);
         card.setPadding(p, p, p, dp(12));
         card.addView(tv(S("Elegir banco", "Choose bank"), 18, true, col("text_primary")));
-        card.addView(tv(S("Código SUPEN del banco receptor", "Receiver bank SUPEN code"), 12, false, col("text_secondary")));
+        card.addView(tv(S("Busca por nombre o código SUPEN", "Search by name or SUPEN code"), 12, false, col("text_secondary")));
 
-        ScrollView sv = new ScrollView(this);
-        LinearLayout list = new LinearLayout(this);
+        final EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        search.setTypeface(TF_REG);
+        search.setTextColor(col("text_primary"));
+        search.setHintTextColor(col("text_secondary"));
+        search.setHint(brandSpan(S("🔍  Buscar banco o código…", "🔍  Search bank or code…")));
+        search.setBackground(rounded(col("input_bg"), 12));
+        search.setPadding(dp(12), dp(9), dp(12), dp(9));
+        search.setInputType(InputType.TYPE_CLASS_TEXT);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.setMargins(0, dp(12), 0, dp(8));
+        card.addView(search, slp);
+
+        final ScrollView sv = new ScrollView(this);
+        final LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
+        fillBankList(list, "", target, d);
+        sv.addView(list);
+        card.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(340)));
+        search.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            public void afterTextChanged(Editable s) {
+                fillBankList(list, s.toString(), target, d);
+                sv.scrollTo(0, 0);
+            }
+        });
+
+        d.setContentView(card, new ViewGroup.LayoutParams(dp(320), ViewGroup.LayoutParams.WRAP_CONTENT));
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.dimAmount = 0.45f;
+            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
+        d.setCanceledOnTouchOutside(true);
+        d.show();
+    }
+
+    private void fillBankList(final LinearLayout list, String query, final EditText target, final Dialog d) {
+        list.removeAllViews();
+        int shown = 0;
         for (int i = 0; i < S7BQr.BANKS.length; i++) {
             final String code = S7BQr.BANKS[i][0];
             final String name = S7BQr.BANKS[i][1];
+            if (!S7BQr.bankMatches(code, name, query)) {
+                continue;
+            }
+            shown++;
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
@@ -957,18 +1002,12 @@ public class MainActivity extends Activity {
             rlp.setMargins(0, dp(6), 0, 0);
             list.addView(row, rlp);
         }
-        sv.addView(list);
-        card.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(360)));
-        d.setContentView(card, new ViewGroup.LayoutParams(dp(320), ViewGroup.LayoutParams.WRAP_CONTENT));
-        Window w = d.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            WindowManager.LayoutParams lp = w.getAttributes();
-            lp.dimAmount = 0.45f;
-            w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        if (shown == 0) {
+            TextView empty = tv(S("🔍 Sin resultados", "🔍 No results"), 14, false, col("text_secondary"));
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(0, dp(24), 0, dp(24));
+            list.addView(empty);
         }
-        d.setCanceledOnTouchOutside(true);
-        d.show();
     }
 
     private void sheetActions(final LinearLayout c, final int t, final int profIdx) {
