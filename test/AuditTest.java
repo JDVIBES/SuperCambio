@@ -1,6 +1,6 @@
 /*
  * Pruebas de la lógica crítica (fechas ISO con offset, vaivenes, fusión del historial
- * compartido y búsqueda de bancos). Corre contra el CÓDIGO REAL de la app.
+ * compartido, búsqueda de bancos y monto del conversor). Corre contra el CÓDIGO REAL.
  *
  * Cómo ejecutarlas (Termux):
  *   cd ~/re/supercambio
@@ -164,6 +164,18 @@ public class AuditTest {
         check(S7BQr.normalizeId("V12345678") != null, "normalizeId V válido");
         check(S7BQr.normalizeId("1234567890123") == null, "normalizeId demasiado largo -> null");
         check(S7BQr.normalizeId("J12345678") != null, "normalizeId J válido");
+
+        // ---------- 5. parseAmount (el monto del conversor) ----------
+        Method parse = MainActivity.class.getDeclaredMethod("parseAmount", String.class);
+        parse.setAccessible(true);
+        check(parse.invoke(act, "899,30").equals(Double.valueOf(899.30)), "parseAmount(899,30) = " + parse.invoke(act, "899,30"));
+        check(parse.invoke(act, "1.054,60").equals(Double.valueOf(1054.60)), "parseAmount(1.054,60) = " + parse.invoke(act, "1.054,60"));
+        check(parse.invoke(act, "1.054").equals(Double.valueOf(1054.0)), "parseAmount(1.054) = miles → " + parse.invoke(act, "1.054"));
+        check(parse.invoke(act, "12.500").equals(Double.valueOf(12500.0)), "parseAmount(12.500) = miles → " + parse.invoke(act, "12.500"));
+        check(parse.invoke(act, "1054.60").equals(Double.valueOf(1054.60)), "parseAmount(1054.60) = decimal → " + parse.invoke(act, "1054.60"));
+        check(parse.invoke(act, "0,5").equals(Double.valueOf(0.5)), "parseAmount(0,5) = " + parse.invoke(act, "0,5"));
+        check(parse.invoke(act, "").equals(Double.valueOf(0.0)), "parseAmount(vacío) = 0");
+        check(parse.invoke(act, "abc").equals(Double.valueOf(0.0)), "parseAmount(abc) = 0");
 
         System.out.println(fails == 0 ? "ALL TESTS PASSED" : (fails + " TEST(S) FAILED"));
         if (fails > 0) System.exit(1);

@@ -173,6 +173,14 @@ public class MainActivity extends Activity {
     private PageCharts pageCharts;
     private PageConv pageConv;
     private PageProfiles pageProfiles;
+    // Estado de las páginas que sobrevive a la reconstrucción de la UI (cambio de tema,
+    // acento, vidrio o idioma, y también el cambio a modo noche del sistema): antes se
+    // perdía la serie y el rango de la gráfica, el modo y la inversión del conversor y el
+    // monto que el usuario había escrito.
+    private int chartSel = 0, chartRangeSel = 1;
+    private int convMode = 0;
+    private boolean convInvert = false;
+    private String convAmount = "";
     private View aboutPage;
     private ImageView aboutLogo;
 
@@ -249,6 +257,8 @@ public class MainActivity extends Activity {
         checkForUpdates(false);
         ui.postDelayed(new Runnable() {
             public void run() {
+                if (destroyed) return;   // la app pudo cerrarse en estos 1,4 s: abrir un
+                // diálogo sobre una Activity destruida la cerraba (BadTokenException)
                 if (updTag.length() > 0) updatePrompt();
             }
         }, 1400);
@@ -258,11 +268,13 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         destroyed = true;
+        dlCancel = true;          // la descarga se cancela: si sigue, retiene la Activity
         nextExpanded = false;
         if (pageRates != null) pageRates.stopTicking();
         if (ui != null) { ui.removeCallbacks(blurTick); tickerOn = false; }
         dismissQuiet(promptDlg); promptDlg = null;
         dismissQuiet(downloadDlg); downloadDlg = null;
+        dismissQuiet(bankDlg); bankDlg = null;
         closeSheet();
     }
 
@@ -828,6 +840,19 @@ public class MainActivity extends Activity {
     // ================= UI RAÍZ (barra flotante) =================
 
     private void buildUi() {
+        // La UI se puede reconstruir (tema, acento, vidrio, idioma) con el panel de la
+        // próxima tasa abierto: el ticker de la página anterior seguía vivo (retenía su árbol
+        // de vistas y seguía consultando la red cada minuto).
+        if (pageRates != null) pageRates.stopTicking();
+        nextExpanded = false;
+        // Se guarda el estado de las páginas antes de tirarlas (ver más abajo el restore).
+        if (pageCharts != null) { chartSel = pageCharts.sel; chartRangeSel = pageCharts.rangeSel; }
+        if (pageConv != null) {
+            convMode = pageConv.mode;
+            convInvert = pageConv.invert;
+            convAmount = pageConv.input.getText().toString();
+        }
+
         rootF = new FrameLayout(this);
         rootF.setBackgroundColor(col("page_bg"));
 
@@ -844,6 +869,16 @@ public class MainActivity extends Activity {
         pager.addView(pageConv.root);
         pager.addView(pageProfiles.root);
         pager.addView(aboutPage);
+
+        // Restore del estado: la gráfica vuelve a la serie y al rango que tenía, y el
+        // conversor a su modo, su dirección y su monto.
+        pageCharts.sel = chartSel;
+        pageCharts.rangeSel = chartRangeSel;
+        pageConv.mode = convMode;
+        pageConv.invert = convInvert;
+        if (convAmount.length() > 0) pageConv.input.setText(convAmount);
+        pageConv.styleSeg();
+        pageConv.recompute();
 
         buildFloatingBar(rootF);
         setContentView(rootF);
@@ -1058,6 +1093,9 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             blurOn = false;
             applyBarBackground();
+            // Se persiste el apagado: si no, el vidrio reaparece al reiniciar la app
+            // sin explicación.
+            saveAll();
         }
     }
 
@@ -1135,6 +1173,7 @@ public class MainActivity extends Activity {
     }
 
     private Dialog curSheet;
+    private Dialog bankDlg;   // selector de banco (para poder cerrarlo al destruir la app)
 
     private LinearLayout sheet(String title) {
         final Dialog d = new Dialog(this);
@@ -1210,6 +1249,12 @@ public class MainActivity extends Activity {
     private void showBankChooser(final EditText target) {
         final Dialog d = new Dialog(this);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        // Se guarda el diálogo para poder cerrarlo al destruir la app (si no, queda una
+        // ventana huérfana: WindowLeaked).
+        bankDlg = d;
+        d.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            public void onDismiss(DialogInterface di) { if (bankDlg == d) bankDlg = null; }
+        });
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackground(surfaceBg(22));
@@ -1532,6 +1577,36 @@ public class MainActivity extends Activity {
             }
             if (clean.length() == 0) {
                 Toast.makeText(this, S("Formato no válido", "Invalid format"), Toast.LENGTH_SHORT).show();
+                return;
+            }
+            final JSONArray imp = clean;
+            int current = loadProfiles().length();
+            if (current > 0) {
+                // Importar REEMPLAZA la lista completa: antes, un archivo equivocado
+                // borraba todos los perfiles sin ningún aviso y sin vuelta atrás.
+                final LinearLayout c = sheet(S("Importar perfiles", "Import profiles"));
+                c.addView(tv(S("Se reemplazarán los ", "This will replace your ") + current
+                        + S(" perfiles actuales por ", " current profiles with ") + imp.length()
+                        + S(" importados.", " imported ones."), 13, false, col("text_secondary")));
+                LinearLayout row = new LinearLayout(this);
+                row.setGravity(Gravity.END);
+                TextView no = tv(S("Cancelar", "Cancel"), 14, true, col("text_secondary"));
+                no.setPadding(dp(16), dp(14), dp(16), dp(4));
+                no.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) { closeSheet(); }
+                });
+                TextView yes = tv(S("Importar", "Import"), 14, true, col("accent"));
+                yes.setPadding(dp(16), dp(14), 0, dp(4));
+                yes.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        saveProfiles(imp);
+                        closeSheet();
+                        Toast.makeText(MainActivity.this, imp.length() + S(" perfiles importados", " profiles imported"), Toast.LENGTH_SHORT).show();
+                    }
+                });
+                row.addView(no);
+                row.addView(yes);
+                c.addView(row);
                 return;
             }
             saveProfiles(clean);
@@ -2000,7 +2075,7 @@ public class MainActivity extends Activity {
         final String shareText = txt.toString();
         LinearLayout c = sheet(S("QR de Pago móvil", "Mobile payment QR"));
         c.addView(tv(S("Muéstrale este código al pagador para que lo escanee.", "Show this code to the payer so they can scan it."), 12, false, col("text_secondary")));
-        ImageView iv = new ImageView(this);
+        final ImageView iv = new ImageView(this);
         iv.setImageBitmap(qr);
         iv.setAdjustViewBounds(true);
         iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -2033,7 +2108,13 @@ public class MainActivity extends Activity {
         c.addView(row);
         if (curSheet != null) {
             curSheet.setOnDismissListener(new DialogInterface.OnDismissListener() {
-                public void onDismiss(DialogInterface d) { qr.recycle(); }
+                public void onDismiss(DialogInterface d) {
+                    // La vista sigue viva un instante más: si se recicla el bitmap con el
+                    // ImageView apuntando a él, al redibujar salta "trying to use a recycled
+                    // bitmap" y se cierra la app.
+                    iv.setImageDrawable(null);
+                    qr.recycle();
+                }
             });
         }
     }
@@ -5408,6 +5489,7 @@ public class MainActivity extends Activity {
                 final boolean fCanceled = dlCancel;
                 ui.post(new Runnable() {
                     public void run() {
+                        if (destroyed) return;   // la app se cerró durante la descarga
                         if (!fOk) {
                             if (!fCanceled) {
                                 pct.setText(iconText(R.drawable.ic_x_circle, S("Error de descarga · revisa tu conexión", "Download failed · check your connection"), 14, col("red")));
@@ -6092,8 +6174,22 @@ public class MainActivity extends Activity {
         try {
             String t = s.replace('\u00A0', ' ').trim();
             if (t.length() == 0) return 0;
-            // Acepta "899,30" y "1.054,60" (miles con punto + decimal con coma)
-            if (t.indexOf(',') >= 0) t = t.replace(".", "").replace(',', '.');
+            if (t.indexOf(',') >= 0) {
+                // "899,30" y "1.054,60": los puntos son de miles y la coma es el decimal
+                t = t.replace(".", "").replace(',', '.');
+            } else if (t.indexOf('.') >= 0) {
+                // Sin coma: "1.054" son MILES (el usuario escribe 1.054 = 1054) y "1054.60"
+                // es un decimal. Antes "1.054" se leía como 1,054.
+                int last = t.lastIndexOf('.');
+                String dec = t.substring(last + 1);
+                if (dec.length() == 3) {
+                    t = t.replace(".", "");
+                } else if (dec.length() == 0) {
+                    t = t.substring(0, last).replace(".", "");
+                } else {
+                    t = t.substring(0, last).replace(".", "") + "." + dec;
+                }
+            }
             return Double.parseDouble(t);
         } catch (Exception e) { return 0; }
     }
