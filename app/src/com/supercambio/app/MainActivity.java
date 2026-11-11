@@ -117,6 +117,7 @@ public class MainActivity extends Activity {
     private static final long SYNC_RETRY = 60000L;       // 1 min tras un fallo
     private static final long CLOCK_SKEW_MAX = 6 * 3600000L; // 6 h por delante se considera error
     private static final long MIN_TS = 1420070400000L;   // 2015-01-01: puntos más viejos se descartan
+    private static final long DEBOUNCE_MS = 1800000L;     // 30 min: descarta vaivenes de la API
 
     private Handler ui;
     private Runnable nextTick;
@@ -604,10 +605,10 @@ public class MainActivity extends Activity {
         }
         // Si no hay serie de cambios pero hay tasa en caché, se siembra con su fecha de
         // publicación para que la gráfica nunca arranque vacía.
-        if (chgUsd.length() == 0 && bcvUsd > 0) recordChange(chgUsd, bcvUsd, tUsd);
-        if (chgEur.length() == 0 && bcvEur > 0) recordChange(chgEur, bcvEur, tEur);
-        if (chgUsdt.length() == 0 && usdt > 0) recordChange(chgUsdt, usdt, tUsdt);
-        if (chgPar.length() == 0 && paralelo > 0) recordChange(chgPar, paralelo, tPar);
+        if (chgUsd.length() == 0 && bcvUsd > 0) recordChange(chgUsd, bcvUsd, tUsd, DEBOUNCE_MS);
+        if (chgEur.length() == 0 && bcvEur > 0) recordChange(chgEur, bcvEur, tEur, DEBOUNCE_MS);
+        if (chgUsdt.length() == 0 && usdt > 0) recordChange(chgUsdt, usdt, tUsdt, 0L);
+        if (chgPar.length() == 0 && paralelo > 0) recordChange(chgPar, paralelo, tPar, DEBOUNCE_MS);
     }
 
     private void saveAll() {
@@ -688,7 +689,9 @@ public class MainActivity extends Activity {
     // Registra un CAMBIO de tasa en la serie de cambios.
     // tPub es el timestamp de publicación de la tasa (el mismo para todos los dispositivos);
     // si no existe o es anterior al último punto, se usa la hora actual.
-    private void recordChange(JSONArray arr, double v, long tPub) {
+    // debounceMs > 0: si la tasa vuelve al valor anterior en menos de ese tiempo, el vaivén
+    // (punto transitorio) se descarta en vez de guardarse. 0 = sin depuración (USDT).
+    private void recordChange(JSONArray arr, double v, long tPub, long debounceMs) {
         if (arr == null || v <= 0) return;
         try {
             long now = System.currentTimeMillis();
@@ -698,6 +701,14 @@ public class MainActivity extends Activity {
                 long lt = last.getLong("t");
                 double lv = last.getDouble("v");
                 if (Math.abs(lv - v) < 1e-9) return;              // no cambió: no es un cambio
+                if (debounceMs > 0 && arr.length() >= 2) {
+                    // ¿es un vaivén? (vuelve al valor anterior en pocos minutos)
+                    JSONObject prev = arr.getJSONObject(arr.length() - 2);
+                    if (Math.abs(prev.getDouble("v") - v) < 1e-9 && (now - lt) < debounceMs) {
+                        arr.remove(arr.length() - 1);             // se descarta el transitorio
+                        return;
+                    }
+                }
                 if (t <= lt) t = now;                              // evita desordenar la serie
                 if (t == lt) { last.put("v", v); return; }         // mismo instante: actualiza
             }
@@ -2632,7 +2643,7 @@ public class MainActivity extends Activity {
                                 tUsd = fTs;
                                 seedHistIfEmpty(histUsd, bcvUsd, tUsd);
                                 appendHist(histUsd, bcvUsd, System.currentTimeMillis());
-                                recordChange(chgUsd, bcvUsd, tUsd);
+                                recordChange(chgUsd, bcvUsd, tUsd, DEBOUNCE_MS);
                                 saveAll();
                                 updateAllPages();
                                 celebrateUntil = System.currentTimeMillis() + 10000;
@@ -2708,8 +2719,9 @@ public class MainActivity extends Activity {
     private class PageCharts {
         ScrollView root;
         ChartView chart;
+        ChartOverview overview;
         LinearLayout segWrap;
-        TextView chartTitle, statMin, statMax, statAvg, statVar, statCount;
+        TextView chartTitle, statMin, statMax, statAvg, statVar, statCount, winLabel;
         LinearLayout rangeWrap;
         int sel = 0;
         int rangeSel = 1;
@@ -2787,8 +2799,42 @@ public class MainActivity extends Activity {
             cclp.setMargins(0, dp(8), 0, 0);
             box.addView(chartCard, cclp);
 
+            // ---- cabecera de la gráfica: etiqueta de ventana + botón reiniciar ----
+            LinearLayout chartHead = new LinearLayout(MainActivity.this);
+            chartHead.setOrientation(LinearLayout.HORIZONTAL);
+            chartHead.setGravity(Gravity.CENTER_VERTICAL);
+            chartHead.setPadding(0, 0, 0, dp(6));
+            chartCard.addView(chartHead, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            winLabel = tv("", 11, false, col("text_secondary"));
+            winLabel.setVisibility(View.GONE);
+            chartHead.addView(winLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+            ImageView resetBtn = new ImageView(MainActivity.this);
+            resetBtn.setImageResource(R.drawable.ic_refresh);
+            resetBtn.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
+            resetBtn.setPadding(dp(8), dp(8), dp(8), dp(8));
+            resetBtn.setBackground(inputSurface(999));
+            resetBtn.setVisibility(View.GONE);
+            resetBtn.setContentDescription(S("Reiniciar zoom", "Reset zoom"));
+            pressScale(resetBtn);
+            resetBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { haptic(v); chart.resetWindow(); }
+            });
+            chartHead.addView(resetBtn, new LinearLayout.LayoutParams(dp(32), dp(32)));
+
             chart = new ChartView();
             chartCard.addView(chart, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
+
+            // ---- barra de navegación (miniatura del rango, arrastrable) ----
+            overview = new ChartOverview();
+            LinearLayout.LayoutParams ovLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
+            ovLp.setMargins(0, dp(8), 0, 0);
+            chartCard.addView(overview, ovLp);
+            chart.setOverview(overview);
+            overview.setChart(chart);
+            chart.setResetBtn(resetBtn);
+            chart.setWinLabel(winLabel);
 
             LinearLayout stats = new LinearLayout(MainActivity.this);
             stats.setOrientation(LinearLayout.HORIZONTAL);
@@ -2856,7 +2902,7 @@ public class MainActivity extends Activity {
             if (n < 2) {
                 statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
                 statCount.setText(n == 0 ? S("Aún no hay datos para esta tasa.", "No data for this rate yet.") : S("1 tasa registrada · se guardará un punto cuando cambie.", "1 rate recorded · a point will be saved when it changes."));
-                chart.setData(null, null);
+                chart.setData(null, null, 0L, 1L);
                 chart.invalidate();
                 return;
             }
@@ -2888,7 +2934,7 @@ public class MainActivity extends Activity {
                     ft.add(t);
                 }
             } catch (Exception e) {
-                chart.setData(null, null);
+                chart.setData(null, null, 0L, 1L);
                 chart.invalidate();
                 return;
             }
@@ -2907,7 +2953,7 @@ public class MainActivity extends Activity {
                     statMin.setText("—"); statMax.setText("—"); statAvg.setText("—"); statVar.setText("—");
                     statCount.setText(S("Sin datos en este rango todavía.", "No data in this range yet."));
                 }
-                chart.setData(null, null);
+                chart.setData(null, null, 0L, 1L);
                 chart.invalidate();
                 return;
             }
@@ -2938,8 +2984,14 @@ public class MainActivity extends Activity {
             statVar.setTextColor(flat ? col("text_secondary") : (var >= 0 ? col("green") : col("red")));
             String[] rLbl = new String[]{ S("últimos 7 días", "last 7 days"), S("último mes", "last month"), S("últimos 3 meses", "last 3 months"), S("todo el historial", "all time") };
             statCount.setText(m + S(" cambios de tasa · ", " rate changes · ") + rLbl[rangeSel] + S(" · se guarda un punto cada vez que la tasa cambia.", " · a point is saved every time the rate changes."));
-            chart.setData(vals, times);
-            chart.startReveal();
+            // Eje temporal: la ventana visible va del inicio del rango hasta ahora, para que se
+            // vea también el tramo final donde la tasa se mantiene sin cambios.
+            long chartT0 = (cut > 0) ? cut : times[0];
+            long chartT1 = System.currentTimeMillis();
+            if (chartT1 <= chartT0) chartT1 = chartT0 + 3600000L;
+            boolean changed = chart.dataChanged(vals, times);
+            chart.setData(vals, times, chartT0, chartT1);
+            if (changed) chart.startReveal();
         }
     }
 
@@ -2949,13 +3001,25 @@ public class MainActivity extends Activity {
         private float progress = 1f;
         private ValueAnimator reveal;
 
-        // ventana visible: zoom (1 = todo el historial) y desplazamiento en unidades de punto
-        private float zoom = 1f, startF = 0f;
-        private float sX0, sY0, gPan0, gSpan = -1f, lastUpX, scrubX, cx0;
+        // ---- Ventana visible en el EJE TEMPORAL (ms) ----
+        // Antes el eje X era por índice (cada punto ocupaba el mismo ancho) y por eso una tasa
+        // mantenida 30 días se veía igual que una que cambió a los 5 minutos. Ahora el eje es
+        // lineal en el tiempo: los tramos donde la tasa se mantiene ocupan su duración real.
+        private float zoom = 1f;
+        private long startT, spanT;
+        private long tMin, tMax;
+        private long gPanT0;
+        private long lastSig = Long.MIN_VALUE;
+
+        private float sX0, sY0, gSpan = -1f, lastUpX, scrubX, cx0;
         private boolean scrub, scrubPass, gOver, pan2;
         private int scrubIdx = -1;
         private long lastUpT = 0L;
         private ScaleGestureDetector scaleDet;
+
+        private View resetBtn;
+        private TextView winLabel;
+        private ChartOverview overview;
 
         private Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -2967,6 +3031,9 @@ public class MainActivity extends Activity {
         private Paint hs = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint halo = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint ref = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint bub = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Path seg = new Path();
 
         ChartView() {
             super(MainActivity.this);
@@ -2987,7 +3054,7 @@ public class MainActivity extends Activity {
             lblB.setTextSize(dp(11.5f));
             lblB.setTypeface(TF_BOLD);
             scrV.setColor(col("text_primary"));
-            scrV.setTextSize(dp(12f));
+            scrV.setTextSize(dp(12.5f));
             scrV.setTypeface(TF_BOLD);
             scrD.setColor(col("text_secondary"));
             scrD.setTextSize(dp(10f));
@@ -3001,6 +3068,12 @@ public class MainActivity extends Activity {
             hs.setAlpha(70);
             halo.setStyle(Paint.Style.STROKE);
             halo.setStrokeWidth(dp(1.5f));
+            ref.setStyle(Paint.Style.STROKE);
+            ref.setStrokeWidth(dp(1f));
+            ref.setColor(col("text_secondary"));
+            ref.setAlpha(110);
+            ref.setPathEffect(new DashPathEffect(new float[]{dp(3), dp(4)}, 0));
+            bub.setStyle(Paint.Style.FILL);
 
             scaleDet = new ScaleGestureDetector(MainActivity.this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
                 public boolean onScale(ScaleGestureDetector d) {
@@ -3024,10 +3097,10 @@ public class MainActivity extends Activity {
                             progress = 1f;
                         }
                         scrub = false; scrubPass = false; gOver = false; pan2 = false; gSpan = -1f;
-                        sX0 = ev.getX(); sY0 = ev.getY(); gPan0 = startF;
+                        sX0 = ev.getX(); sY0 = ev.getY(); gPanT0 = startT;
                         long now = System.currentTimeMillis();
                         if (now - lastUpT < 350L && Math.abs(ev.getX() - lastUpX) < dp(28f)) {
-                            zoom = 1f; startF = 0f; scrub = false; scrubIdx = -1; gOver = true; invalidate();
+                            resetWindow();
                             lastUpT = 0L;
                             return true;
                         }
@@ -3041,15 +3114,13 @@ public class MainActivity extends Activity {
                     if (act == MotionEvent.ACTION_POINTER_DOWN) {
                         scrub = false; scrubPass = false; pan2 = true; gSpan = -1f;
                         cx0 = (ev.getX(0) + ev.getX(1)) / 2f;
-                        gPan0 = startF;
+                        gPanT0 = startT;
                         if (sc != null) sc.requestDisallowInterceptTouchEvent(true);
                         invalidate();
                         return true;
                     }
                     if (act == MotionEvent.ACTION_POINTER_UP) {
-                        // rebaseline SIEMPRE (en POINTER_UP el evento aún cuenta al dedo
-                        // que sube: getPointerCount()==1 nunca ocurre aquí)
-                        sX0 = ev.getX(); sY0 = ev.getY(); gPan0 = startF;
+                        sX0 = ev.getX(); sY0 = ev.getY(); gPanT0 = startT;
                         pan2 = false; gSpan = -1f; scrub = false; scrubPass = false;
                         invalidate();
                         return true;
@@ -3060,8 +3131,10 @@ public class MainActivity extends Activity {
                             scaleDet.onTouchEvent(ev);
                             float cx = (ev.getX(0) + ev.getX(ev.getPointerCount() - 1)) / 2f;
                             if (pan2) {
-                                startF = gPan0 - (cx - cx0) / Math.max(1f, getWidth() - pl() - pr()) * winNow();
+                                long span = spanNow();
+                                startT = gPanT0 - (long)((cx - cx0) / Math.max(1f, getWidth() - pl() - pr()) * (float) span);
                                 clampStart();
+                                windowChanged();
                             }
                             invalidate();
                             return true;
@@ -3091,6 +3164,11 @@ public class MainActivity extends Activity {
                     if (act == MotionEvent.ACTION_UP) {
                         lastUpT = System.currentTimeMillis();
                         lastUpX = ev.getX();
+                        // la burbuja PERSISTE: no se borra al soltar el dedo
+                        if (scrubIdx < 0 && times != null && times.length > 0) {
+                            scrubX = ev.getX();
+                            updScrubIdx();
+                        }
                         scrub = false;
                         invalidate();
                         if (sc != null) sc.requestDisallowInterceptTouchEvent(false);
@@ -3108,67 +3186,186 @@ public class MainActivity extends Activity {
         }
 
         private float pl() { return dp(10f); }
-        private float pr() { return dp(10f); }
+        private float pr() { return dp(48f); }
         private float pt() { return dp(40f); }
         private float pb() { return dp(48f); }
 
-        private void scrubEdgeScroll() {
-            if (vals == null) return;
-            float w = getWidth();
-            float usableW = Math.max(1f, w - pl() - pr());
-            float win = winNow();
-            if (scrubX > w - pr()) startF += (scrubX - (w - pr())) / usableW * win * 0.55f;
-            else if (scrubX < pl()) startF -= (pl() - scrubX) / usableW * win * 0.55f;
-            clampStart();
+        // ================= VENTANA TEMPORAL =================
+        private long spanNow() {
+            long full = tMax - tMin;
+            if (full <= 0) return 3600000L;
+            float z = Math.max(1f, zoom);
+            long s = (long) ((float) full / z);
+            long min = minSpan();
+            if (s < min) { s = min; zoom = (float) full / (float) min; if (zoom < 1f) zoom = 1f; }
+            if (s > full) { s = full; zoom = 1f; }
+            return s;
         }
 
-        private void updScrubIdx() {
-            if (vals == null) { scrubIdx = -1; return; }
-            float usableW = Math.max(1f, getWidth() - pl() - pr());
-            float win = winNow();
-            float idxF = startF + (scrubX - pl()) / usableW * win;
-            int idx = Math.round(idxF);
-            if (idx < 0) idx = 0;
-            if (idx > vals.length - 1) idx = vals.length - 1;
-            scrubIdx = idx;
-        }
-
-        private float winNow() {
-            if (vals == null || vals.length < 2) return 2f;
-            float t = vals.length;
-            float f = t / zoom;
-            if (f < 2f) { zoom = t / 2f; f = 2f; }
-            if (f > t) { zoom = 1f; f = t; }
-            return f;
+        private long minSpan() {
+            long d = 900000L;   // mínimo 15 min
+            if (times != null && times.length >= 2) {
+                long dd = times[1] - times[0];
+                if (dd > 0) d = Math.max(d, dd * 2);
+            }
+            return d;
         }
 
         private void clampStart() {
-            if (vals == null) { startF = 0f; return; }
-            float t = vals.length;
-            float maxStart = Math.max(0f, t - winNow());
-            if (startF < 0f) startF = 0f;
-            if (startF > maxStart) startF = maxStart;
+            long full = tMax - tMin;
+            if (full <= 0) { startT = tMin; return; }
+            long s = spanNow();
+            if (s > full) s = full;
+            if (startT < tMin) startT = tMin;
+            if (startT > tMax - s) startT = tMax - s;
+            if (startT < tMin) startT = tMin;
         }
 
         private void applyZoom(float fx, float factor) {
             if (vals == null || vals.length < 2) return;
-            float t = vals.length;
             float usableW = Math.max(1f, getWidth() - pl() - pr());
             float rel = Math.min(1f, Math.max(0f, (fx - pl()) / usableW));
-            float oldWin = winNow();
-            float anchor = startF + rel * oldWin;
-            zoom = Math.min(t / 2f, Math.max(1f, zoom * factor));
-            float nw = winNow();
-            startF = anchor - rel * nw;
+            long oldSpan = spanNow();
+            long anchorT = startT + (long) (rel * (float) oldSpan);
+            long full = tMax - tMin;
+            float maxZoom = (float) full / (float) minSpan();
+            if (maxZoom < 1f) maxZoom = 1f;
+            zoom = Math.min(maxZoom, Math.max(1f, zoom * factor));
+            long newSpan = spanNow();
+            startT = anchorT - (long) (rel * (float) newSpan);
             clampStart();
+            windowChanged();
         }
 
-        void setData(float[] v, long[] t) {
+        private void resetWindow() {
+            zoom = 1f;
+            startT = tMin;
+            spanT = tMax - tMin;
+            scrubIdx = -1;
+            scrub = false;
+            windowChanged();
+            invalidate();
+        }
+
+        // La ventana cambió: se avisa al botón reiniciar, a la etiqueta y a la barra de navegación.
+        private void windowChanged() {
+            if (resetBtn != null) {
+                resetBtn.setVisibility(zoom > 1.001f ? View.VISIBLE : View.GONE);
+            }
+            if (winLabel != null) {
+                long s = startT, e = startT + spanNow();
+                winLabel.setText(S("Ventana: ", "Window: ") + fmtDay(s) + " – " + fmtDay(e));
+                winLabel.setVisibility(zoom > 1.001f ? View.VISIBLE : View.GONE);
+            }
+            if (overview != null) overview.invalidate();
+        }
+
+        long winStart() { return startT; }
+        long winSpan() { return spanNow(); }
+        long rangeStart() { return tMin; }
+        long rangeEnd() { return tMax; }
+
+        void setWindow(long s, long span) {
+            long full = tMax - tMin;
+            if (full <= 0) return;
+            if (span < minSpan()) span = minSpan();
+            if (span > full) span = full;
+            zoom = (float) full / (float) span;
+            if (zoom < 1f) zoom = 1f;
+            startT = s;
+            clampStart();
+            windowChanged();
+            invalidate();
+        }
+
+        // índice del último punto con times[i] <= t (-1 si ninguno)
+        private int idxAtOrBefore(long t) {
+            int lo = 0, hi = times.length - 1, res = -1;
+            while (lo <= hi) {
+                int mid = (lo + hi) >>> 1;
+                if (times[mid] <= t) { res = mid; lo = mid + 1; }
+                else hi = mid - 1;
+            }
+            return res;
+        }
+
+        // índice del primer punto con times[i] >= t (times.length si ninguno)
+        private int idxAtOrAfter(long t) {
+            int lo = 0, hi = times.length - 1, res = times.length;
+            while (lo <= hi) {
+                int mid = (lo + hi) >>> 1;
+                if (times[mid] >= t) { res = mid; hi = mid - 1; }
+                else lo = mid + 1;
+            }
+            return res;
+        }
+
+        private void scrubEdgeScroll() {
+            float w = getWidth();
+            float usableW = Math.max(1f, w - pl() - pr());
+            long span = spanNow();
+            if (scrubX > w - pr()) startT += (long) ((scrubX - (w - pr())) / usableW * (float) span * 0.55f);
+            else if (scrubX < pl()) startT -= (long) ((pl() - scrubX) / usableW * (float) span * 0.55f);
+            clampStart();
+            windowChanged();
+        }
+
+        private void updScrubIdx() {
+            if (times == null || times.length == 0) { scrubIdx = -1; return; }
+            float usableW = Math.max(1f, getWidth() - pl() - pr());
+            long span = spanNow();
+            long t = startT + (long) ((scrubX - pl()) / usableW * (float) span);
+            if (t < tMin) t = tMin;
+            int i = idxAtOrBefore(t);
+            if (i < 0) i = 0;
+            if (i > times.length - 1) i = times.length - 1;
+            scrubIdx = i;
+        }
+
+        // x de un instante (clampado a los bordes de la ventana)
+        private float xOf(long t, float padL, float usableW, long winStart, long span) {
+            if (span <= 0) return padL;
+            if (t <= winStart) return padL;
+            if (t >= winStart + span) return padL + usableW;
+            return padL + usableW * ((float) (t - winStart) / (float) span);
+        }
+
+        void setData(float[] v, long[] t, long rangeStart, long rangeEnd) {
+            // El zoom se conserva mientras el rango y los datos sean los mismos (tMax es "ahora"
+            // y cambia en cada refresco, por eso no se compara).
+            boolean sameRange = (rangeStart == tMin
+                    && t != null && times != null && t.length == times.length
+                    && (t.length == 0 || t[t.length - 1] == times[times.length - 1]));
+            if (!sameRange) scrubIdx = -1;
             vals = v;
             times = t;
-            zoom = 1f;
-            startF = 0f;
+            tMin = rangeStart;
+            tMax = rangeEnd;
+            if (tMax <= tMin) tMax = tMin + 3600000L;
+            if (!sameRange) {
+                zoom = 1f;
+                startT = tMin;
+                scrubIdx = -1;
+                scrub = false;
+            }
+            spanT = tMax - tMin;
+            clampStart();
+            windowChanged();
+            if (overview != null) overview.setData(v, t, tMin, tMax);
         }
+
+        // ¿los datos cambiaron de verdad? (para no repetir la animación de trazado)
+        boolean dataChanged(float[] v, long[] t) {
+            long sig = (t != null && t.length > 0) ? t[t.length - 1] : 0L;
+            sig = sig * 31L + (v != null ? v.length : 0);
+            if (sig == lastSig) return false;
+            lastSig = sig;
+            return true;
+        }
+
+        void setResetBtn(View b) { resetBtn = b; }
+        void setWinLabel(TextView t) { winLabel = t; }
+        void setOverview(ChartOverview o) { overview = o; }
 
         void startReveal() {
             if (reveal != null) reveal.cancel();
@@ -3204,13 +3401,16 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            int totalN = vals.length;
-            float win = winNow();
+            long span = spanNow();
             clampStart();
-            int iA = (int) Math.floor(startF) - 1;
+            long winStart = startT, winEnd = startT + span;
+
+            // puntos visibles (por tiempo, con uno de margen a cada lado)
+            int iA = idxAtOrBefore(winStart);
             if (iA < 0) iA = 0;
-            int iB = (int) Math.ceil(startF + win) + 1;
-            if (iB > totalN - 1) iB = totalN - 1;
+            int iB = idxAtOrAfter(winEnd);
+            if (iB > vals.length - 1) iB = vals.length - 1;
+            if (iB < iA) iB = iA;
             int m = iB - iA + 1;
 
             float vmin = vals[iA], vmax = vals[iA];
@@ -3228,15 +3428,16 @@ public class MainActivity extends Activity {
             int iMaxK = 0, iMinK = 0;
             for (int k = 0; k < m; k++) {
                 int idx = iA + k;
-                float rel = (idx - startF) / win;
-                xs[k] = padL + usableW * rel;
+                xs[k] = xOf(times[idx], padL, usableW, winStart, span);
                 float norm = (vals[idx] - ymin) / yr;
                 ys[k] = padT + usableH * (1f - norm);
                 if (vals[idx] > vals[iA + iMaxK]) iMaxK = k;
                 if (vals[idx] < vals[iA + iMinK]) iMinK = k;
             }
 
-            boolean up = vals[iB] >= vals[iA];
+            int iEnd = idxAtOrBefore(winEnd);
+            if (iEnd < 0) iEnd = 0;
+            boolean up = vals[iEnd] >= vals[iA];
             int trend = up ? col("green") : col("red");
 
             for (int g = 0; g <= 2; g++) {
@@ -3244,66 +3445,84 @@ public class MainActivity extends Activity {
                 canvas.drawLine(padL, gy, w - padR, gy, grid);
             }
 
-            Path fp = new Path();
-            fp.moveTo(xs[0], ys[0]);
-            // Step: la tasa se mantiene plana y salta el día que se publica, en vez de
-            // dibujarse como una rampa entre dos puntos de cambio.
+            // ---------- área bajo la línea ----------
+            Path area = new Path();
+            area.moveTo(xs[0], ys[0]);
             for (int i = 1; i < m; i++) {
-                fp.lineTo(xs[i], ys[i - 1]);
-                fp.lineTo(xs[i], ys[i]);
+                area.lineTo(xs[i], ys[i - 1]);
+                area.lineTo(xs[i], ys[i]);
             }
-
-            Path drawPath = fp;
-            float endXLine = xs[m - 1], endYLine = ys[m - 1];
-            if (progress < 1f) {
-                PathMeasure pm = new PathMeasure(fp, false);
-                float segLen = pm.getLength() * progress;
-                Path seg = new Path();
-                if (!pm.getSegment(0, segLen, seg, true)) {
-                    seg.moveTo(xs[0], ys[0]);
-                }
-                float[] pos = new float[2];
-                pm.getPosTan(segLen, pos, null);
-                endXLine = pos[0];
-                endYLine = pos[1];
-                drawPath = seg;
-            }
-
-            // CLIP: la línea, el relleno y los puntos viven SOLO dentro del área de trazado,
-            // así ningún texto en las bandas exteriores puede quedar bajo la línea
-            int saveCnt = canvas.save();
-            canvas.clipRect(padL, padT, w - padR, plotB);
-
-            Path area = new Path(drawPath);
-            area.lineTo(endXLine, plotB);
+            area.lineTo(xs[m - 1], plotB);
             area.lineTo(xs[0], plotB);
             area.close();
+
+            int saveCnt = canvas.save();
+            float revealX = padL + usableW * progress;
+            canvas.clipRect(padL, padT, Math.min(w - padR, revealX), plotB);
+
             int cr = Color.red(trend), cg = Color.green(trend), cb = Color.blue(trend);
             fill.setShader(new LinearGradient(0, padT, 0, plotB,
                     Color.argb(66, cr, cg, cb), Color.argb(0, cr, cg, cb), Shader.TileMode.CLAMP));
             canvas.drawPath(area, fill);
             fill.setShader(null);
 
-            line.setColor(trend);
-            canvas.drawPath(drawPath, line);
-
-            if (scrub && scrubIdx >= iA && scrubIdx <= iB) {
-                canvas.drawLine(xs[scrubIdx - iA], padT, xs[scrubIdx - iA], plotB, hs);
+            // ---------- línea por tramos (verde si sube, rojo si baja) ----------
+            for (int i = 1; i < m; i++) {
+                float x0 = xs[i - 1], x1 = xs[i];
+                float y0 = ys[i - 1], y1 = ys[i];
+                int c;
+                if (y1 < y0 - 0.01f) c = col("green");
+                else if (y1 > y0 + 0.01f) c = col("red");
+                else c = trend;
+                line.setColor(c);
+                seg.reset();
+                seg.moveTo(x0, y0);
+                seg.lineTo(x1, y0);
+                canvas.drawPath(seg, line);
+                if (Math.abs(y1 - y0) > 0.01f) {
+                    seg.reset();
+                    seg.moveTo(x1, y0);
+                    seg.lineTo(x1, y1);
+                    canvas.drawPath(seg, line);
+                }
             }
 
-            if (m <= 60 && progress >= 1f) {
-                dot.setColor(trend);
-                for (int i = 0; i < m; i++) {
-                    canvas.drawCircle(xs[i], ys[i], dp(2.2f), dot);
+            // ---------- marca del momento del cambio ----------
+            for (int i = 0; i < m; i++) {
+                int idx = iA + i;
+                if (i > 0 && i < m - 1) {
+                    // sólo el punto de cambio real (el primero es la línea base)
                 }
+                int c = (i > 0) ? (ys[i] < ys[i - 1] ? col("green") : (ys[i] > ys[i - 1] ? col("red") : trend)) : trend;
+                dot.setColor(c);
+                canvas.drawCircle(xs[i], ys[i], dp(2.1f), dot);
+                if (m <= 40 && i > 0 && i < m - 1) {
+                    hs.setAlpha(45);
+                    canvas.drawLine(xs[i], ys[i], xs[i], ys[i] + dp(7), hs);
+                    hs.setAlpha(70);
+                }
+            }
+
+            // ---------- línea de referencia del valor actual ----------
+            float curVal = vals[vals.length - 1];
+            float curY = padT + usableH * (1f - (curVal - ymin) / yr);
+            if (curY > padT - dp(4) && curY < plotB + dp(4)) {
+                canvas.drawLine(padL, curY, w - padR, curY, ref);
+            }
+
+            if (scrubIdx >= iA && scrubIdx <= iB && scrubIdx >= 0) {
+                float mx = xs[scrubIdx - iA], my = ys[scrubIdx - iA];
+                hs.setAlpha(70);
+                canvas.drawLine(mx, padT, mx, plotB, hs);
+                dot.setColor(Color.WHITE);
+                canvas.drawCircle(mx, my, dp(4.8f), dot);
+                dot.setColor(trend);
+                canvas.drawCircle(mx, my, dp(3.4f), dot);
             }
             canvas.restoreToCount(saveCnt);
 
-            // punto blanco del extremo del ventano
-            int iEnd = Math.round(startF + win);
-            if (iEnd > totalN - 1) iEnd = totalN - 1;
-            if (iEnd < iA) iEnd = iA;
-            float xEnd = padL + usableW * ((iEnd - startF) / win);
+            // ---------- punto blanco del extremo de la ventana ----------
+            float xEnd = padL + usableW;
             float yEnd = padT + usableH * (1f - (vals[iEnd] - ymin) / yr);
             halo.setColor(Color.argb(70, Color.red(trend), Color.green(trend), Color.blue(trend)));
             canvas.drawCircle(xEnd, yEnd, dp(7.5f), halo);
@@ -3312,50 +3531,209 @@ public class MainActivity extends Activity {
             dot.setColor(trend);
             canvas.drawCircle(xEnd, yEnd, dp(3f), dot);
 
-            // ============ etiquetas: cada una en su BANDA reservada ============
+            // ---------- etiqueta del valor actual (banda derecha) ----------
+            if (curY > padT - dp(4) && curY < plotB + dp(4)) {
+                float ly = Math.min(Math.max(curY, padT + dp(6)), plotB - dp(2));
+                txt.setTextAlign(Paint.Align.RIGHT);
+                txt.setTextSize(dp(8.5f));
+                canvas.drawText(S("actual", "now"), w - dp(3), ly - dp(11), txt);
+                txt.setTextSize(dp(10.5f));
+                canvas.drawText(fmt(curVal), w - dp(3), ly - dp(1), txt);
+                txt.setTextAlign(Paint.Align.LEFT);
+            }
+
+            // ---------- eje X: varias fechas distribuidas ----------
+            int nT = 4;
+            float prevRight = -1000f;
+            for (int k = 0; k <= nT; k++) {
+                long t = winStart + (long) (span * k / nT);
+                float x = padL + usableW * k / nT;
+                String s = fmtAxisDate(t, span);
+                float tw = txt.measureText(s);
+                Paint.Align al;
+                float tx;
+                if (k == 0) { al = Paint.Align.LEFT; tx = padL; }
+                else if (k == nT) { al = Paint.Align.RIGHT; tx = w - padR; }
+                else { al = Paint.Align.CENTER; tx = x; }
+                float left = (al == Paint.Align.LEFT) ? tx : (al == Paint.Align.RIGHT ? tx - tw : tx - tw / 2f);
+                if (left < prevRight + dp(8)) continue;
+                txt.setTextAlign(al);
+                canvas.drawText(s, tx, h - dp(10), txt);
+                prevRight = left + tw;
+            }
+            txt.setTextAlign(Paint.Align.LEFT);
+
+            // ---------- máximo y mínimo (con su fecha) ----------
             SimpleDateFormat fdf = new SimpleDateFormat("d MMM", new Locale("es"));
-            boolean sShow = scrub && scrubIdx >= 0 && scrubIdx < totalN && scrubIdx >= iA && scrubIdx <= iB;
+            lblB.setTextAlign(Paint.Align.CENTER);
+            String sMax = fmt(vals[iA + iMaxK]) + " · " + fdf.format(new Date(times[iA + iMaxK]));
+            float hwMax = lblB.measureText(sMax) / 2f + 1f;
+            float xMax = Math.min(Math.max(xs[iMaxK], padL + hwMax), w - padR - hwMax);
+            canvas.drawText(sMax, xMax, padT - dp(9), lblB);
 
-            // fechas del ventano visible — fila inferior (siempre visibles)
-            txt.setTextAlign(Paint.Align.LEFT);
-            canvas.drawText(fdf.format(new Date(times[iA])), padL, h - dp(10), txt);
-            txt.setTextAlign(Paint.Align.RIGHT);
-            canvas.drawText(fdf.format(new Date(times[iB])), w - padR, h - dp(10), txt);
-            txt.setTextAlign(Paint.Align.LEFT);
+            String sMin = fmt(vals[iA + iMinK]) + " · " + fdf.format(new Date(times[iA + iMinK]));
+            float hwMin = lblB.measureText(sMin) / 2f + 1f;
+            float xMin = Math.min(Math.max(xs[iMinK], padL + hwMin), w - padR - hwMin);
+            canvas.drawText(sMin, xMin, plotB + dp(13), lblB);
 
-            if (sShow) {
-                // marcador del punto tocado
+            // ---------- burbuja flotante (persistente) ----------
+            if (scrubIdx >= 0 && scrubIdx < vals.length) {
                 float mx = xs[scrubIdx - iA], my = ys[scrubIdx - iA];
-                dot.setColor(Color.WHITE);
-                canvas.drawCircle(mx, my, dp(4.8f), dot);
-                dot.setColor(trend);
-                canvas.drawCircle(mx, my, dp(3.4f), dot);
-                // burbuja en la banda superior (mín/máx ocultas: no puede pisarlas)
-                String sV = fmt(vals[scrubIdx]);
-                String sDt = fdf.format(new Date(times[scrubIdx]));
-                float hw = Math.max(scrV.measureText(sV), scrD.measureText(sDt)) / 2f + 1f;
-                float bx = Math.min(Math.max(mx, padL + hw), w - padR - hw);
-                scrV.setTextAlign(Paint.Align.CENTER);
-                scrD.setTextAlign(Paint.Align.CENTER);
-                canvas.drawText(sV, bx, padT - dp(26), scrV);
-                canvas.drawText(sDt, bx, padT - dp(10), scrD);
-            } else {
-                // máximo → banda superior (la línea nunca entra aquí: clip)
-                lblB.setTextAlign(Paint.Align.CENTER);
-                String sMax = fmt(vals[iA + iMaxK]);
-                float hwMax = lblB.measureText(sMax) / 2f + 1f;
-                float xMax = Math.min(Math.max(xs[iMaxK], padL + hwMax), w - padR - hwMax);
-                canvas.drawText(sMax, xMax, padT - dp(9), lblB);
+                String b1 = fmt(vals[scrubIdx]);
+                String b2 = S("vigente desde ", "since ") + fdf.format(new Date(times[scrubIdx]));
+                if (scrubIdx > 0) {
+                    double dv = vals[scrubIdx - 1];
+                    if (dv != 0) {
+                        double pc = (vals[scrubIdx] - dv) / dv * 100.0;
+                        b2 = b2 + " · " + (pc >= 0 ? "+" : "−") + String.format(new Locale("es", "VE"), "%.2f %%", Math.abs(pc));
+                    }
+                }
+                float tw = Math.max(scrV.measureText(b1), scrD.measureText(b2));
+                float bw = tw + dp(16), bh = dp(32);
+                float bx = mx - bw / 2f;
+                float by = my - bh - dp(10);
+                if (by < padT + dp(2)) by = my + dp(12);
+                if (by + bh > plotB) by = plotB - bh;
+                bx = Math.min(Math.max(bx, padL + dp(2)), w - padR - bw - dp(2));
+                bub.setColor(isDark() ? Color.argb(225, 28, 28, 30) : Color.argb(235, 255, 255, 255));
+                canvas.drawRoundRect(new RectF(bx, by, bx + bw, by + bh), dp(9), dp(9), bub);
+                scrV.setColor(col("text_primary"));
+                scrV.setTextAlign(Paint.Align.LEFT);
+                canvas.drawText(b1, bx + dp(8), by + dp(14), scrV);
+                scrD.setColor(col("text_secondary"));
+                canvas.drawText(b2, bx + dp(8), by + dp(26), scrD);
+            }
+        }
 
-                // mínimo → banda inferior
-                String sMin = fmt(vals[iA + iMinK]);
-                float hwMin = lblB.measureText(sMin) / 2f + 1f;
-                float xMin = Math.min(Math.max(xs[iMinK], padL + hwMin), w - padR - hwMin);
-                canvas.drawText(sMin, xMin, plotB + dp(13), lblB);
+        private String fmtAxisDate(long t, long span) {
+            try {
+                if (span <= 36L * 3600000L) return new SimpleDateFormat("HH:mm", new Locale("es", "VE")).format(new Date(t));
+                if (span <= 60L * 86400000L) return new SimpleDateFormat("d MMM", new Locale("es")).format(new Date(t));
+                return new SimpleDateFormat("MMM yy", new Locale("es")).format(new Date(t));
+            } catch (Exception e) {
+                return "";
             }
         }
     }
 
+    // ================= BARRA DE NAVEGACIÓN (miniatura del rango) =================
+    private class ChartOverview extends View {
+        private float[] vals;
+        private long[] times;
+        private long tMin, tMax;
+        private ChartView chart;
+        private float downX;
+        private boolean dragging;
+        private Paint ovLine = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint ovArea = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint ovSel = new Paint();
+        private Paint ovTxt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Path ovPath = new Path();
+
+        ChartOverview() {
+            super(MainActivity.this);
+            ovLine.setStyle(Paint.Style.STROKE);
+            ovLine.setStrokeWidth(dp(1.4f));
+            ovLine.setColor(col("text_secondary"));
+            ovArea.setStyle(Paint.Style.FILL);
+            ovSel.setStyle(Paint.Style.FILL);
+            ovTxt.setColor(col("text_secondary"));
+            ovTxt.setTextSize(dp(9.5f));
+            ovTxt.setTypeface(TF_REG);
+            setOnTouchListener(new View.OnTouchListener() {
+                public boolean onTouch(View v, MotionEvent ev) {
+                    if (chart == null || tMax <= tMin) return false;
+                    int act = ev.getActionMasked();
+                    float w = getWidth();
+                    if (act == MotionEvent.ACTION_DOWN) {
+                        downX = ev.getX();
+                        dragging = false;
+                        return true;
+                    }
+                    if (act == MotionEvent.ACTION_MOVE) {
+                        if (Math.abs(ev.getX() - downX) > dp(3)) dragging = true;
+                        if (dragging) {
+                            long full = tMax - tMin;
+                            long dT = (long) ((ev.getX() - downX) / Math.max(1f, w) * (float) full);
+                            chart.setWindow(chart.winStart() + dT, chart.winSpan());
+                        }
+                        return true;
+                    }
+                    if (act == MotionEvent.ACTION_UP) {
+                        if (!dragging) {
+                            // toque: centra la ventana en ese instante
+                            long full = tMax - tMin;
+                            long t = tMin + (long) (ev.getX() / Math.max(1f, w) * (float) full);
+                            long span = chart.winSpan();
+                            chart.setWindow(t - span / 2, span);
+                        }
+                        dragging = false;
+                        return true;
+                    }
+                    return false;
+                }
+            });
+        }
+
+        void setChart(ChartView c) { chart = c; }
+
+        void setData(float[] v, long[] t, long a, long b) {
+            vals = v; times = t; tMin = a; tMax = b;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int w = getWidth(), h = getHeight();
+            if (w == 0 || h == 0) return;
+            if (vals == null || vals.length < 2 || tMax <= tMin) {
+                ovTxt.setTextAlign(Paint.Align.CENTER);
+                canvas.drawText(S("Sin historial para navegar", "No history to browse"), w / 2f, h / 2f + dp(3), ovTxt);
+                ovTxt.setTextAlign(Paint.Align.LEFT);
+                return;
+            }
+            float vmin = vals[0], vmax = vals[0];
+            for (int i = 0; i < vals.length; i++) {
+                if (vals[i] < vmin) vmin = vals[i];
+                if (vals[i] > vmax) vmax = vals[i];
+            }
+            float vr = vmax - vmin;
+            if (vr <= 0f) vr = 1f;
+            float pad = dp(3);
+            float hh = h - pad * 2;
+
+            ovPath.reset();
+            float px = 0, py = 0;
+            for (int i = 0; i < vals.length; i++) {
+                float x = pad + (w - pad * 2) * (float) (times[i] - tMin) / (float) (tMax - tMin);
+                float y = pad + hh * (1f - (vals[i] - vmin) / vr);
+                if (i == 0) ovPath.moveTo(x, y);
+                else { ovPath.lineTo(x, py); ovPath.lineTo(x, y); }
+                px = x; py = y;
+            }
+            int c = vals[vals.length - 1] >= vals[0] ? col("green") : col("red");
+            ovLine.setColor(Color.argb(150, Color.red(c), Color.green(c), Color.blue(c)));
+            canvas.drawPath(ovPath, ovLine);
+
+            // ventana visible
+            if (chart != null) {
+                long ws = chart.winStart(), we = chart.winStart() + chart.winSpan();
+                float x0 = pad + (w - pad * 2) * (float) (ws - tMin) / (float) (tMax - tMin);
+                float x1 = pad + (w - pad * 2) * (float) (we - tMin) / (float) (tMax - tMin);
+                if (x0 < pad) x0 = pad;
+                if (x1 > w - pad) x1 = w - pad;
+                if (x1 < x0) x1 = x0;
+                ovSel.setColor(Color.argb(70, Color.red(c), Color.green(c), Color.blue(c)));
+                canvas.drawRect(x0, 0, x1, h, ovSel);
+                ovLine.setColor(Color.argb(220, Color.red(c), Color.green(c), Color.blue(c)));
+                ovLine.setStrokeWidth(dp(1.6f));
+                canvas.drawLine(x0, 0, x0, h, ovLine);
+                canvas.drawLine(x1, 0, x1, h, ovLine);
+                ovLine.setStrokeWidth(dp(1.4f));
+            }
+        }
+    }
     // ================= PÁGINA CONVERSOR =================
 
     private class PageConv {
@@ -4415,10 +4793,10 @@ public class MainActivity extends Activity {
                             appendHist(histPar, paralelo, nowMs);
                             // Serie de cambios: un punto por cambio, fechado con el timestamp de
                             // publicación de la tasa (así todos los usuarios marcan el mismo instante).
-                            recordChange(chgUsd, bcvUsd, tUsd);
-                            recordChange(chgEur, bcvEur, tEur);
-                            recordChange(chgUsdt, usdt, tUsdt);
-                            recordChange(chgPar, paralelo, tPar);
+                            recordChange(chgUsd, bcvUsd, tUsd, DEBOUNCE_MS);
+                            recordChange(chgEur, bcvEur, tEur, DEBOUNCE_MS);
+                            recordChange(chgUsdt, usdt, tUsdt, 0L);
+                            recordChange(chgPar, paralelo, tPar, DEBOUNCE_MS);
                             saveAll();
                         }
                         updateAllPages();
@@ -4936,10 +5314,10 @@ public class MainActivity extends Activity {
                     final JSONArray rPar = remote.optJSONArray("par");
 
                     // Fusión por timestamp (NO muta los arrays vivos; los aplica la UI).
-                    final JSONArray mUsd = mergeChanges(rUsd, chgUsd);
-                    final JSONArray mEur = mergeChanges(rEur, chgEur);
-                    final JSONArray mUsdt = mergeChanges(rUsdt, chgUsdt);
-                    final JSONArray mPar = mergeChanges(rPar, chgPar);
+                    final JSONArray mUsd = mergeChanges(rUsd, chgUsd, DEBOUNCE_MS);
+                    final JSONArray mEur = mergeChanges(rEur, chgEur, DEBOUNCE_MS);
+                    final JSONArray mUsdt = mergeChanges(rUsdt, chgUsdt, 0L);
+                    final JSONArray mPar = mergeChanges(rPar, chgPar, DEBOUNCE_MS);
                     final boolean changed = mUsd != null || mEur != null || mUsdt != null || mPar != null;
                     final boolean localNew = hasNewLocal(rUsd, chgUsd) || hasNewLocal(rEur, chgEur)
                             || hasNewLocal(rUsdt, chgUsdt) || hasNewLocal(rPar, chgPar);
@@ -4999,7 +5377,8 @@ public class MainActivity extends Activity {
 
     // Fusiona la serie remota con la local por timestamp. NO muta los arrays vivos.
     // Devuelve null si la nube no aportó nada nuevo y la local ya estaba limpia.
-    private JSONArray mergeChanges(JSONArray remote, JSONArray local) {
+    // debounceMs > 0 descarta los vaivenes (vuelve al valor anterior en pocos minutos).
+    private JSONArray mergeChanges(JSONArray remote, JSONArray local, long debounceMs) {
         if (local == null) return null;
         try {
             java.util.TreeMap<Long, Double> map = new java.util.TreeMap<Long, Double>();
@@ -5040,9 +5419,43 @@ public class MainActivity extends Activity {
                 np.put("v", v);
                 arr.put(np);
             }
+            if (debounceMs > 0) arr = dropFlaps(arr, debounceMs);
             return arr;
         } catch (Exception ignored) { }
         return null;
+    }
+
+    // Elimina los vaivenes: si la serie va A → B → A y B duró menos de debounceMs, se
+    // descarta B (era un pico transitorio de la fuente, no un cambio real de la tasa).
+    private JSONArray dropFlaps(JSONArray src, long debounceMs) {
+        JSONArray out = new JSONArray();
+        if (src == null) return out;
+        try {
+            for (int i = 0; i < src.length(); i++) {
+                JSONObject o = src.getJSONObject(i);
+                long t = o.getLong("t");
+                double v = o.getDouble("v");
+                if (out.length() >= 1 && i + 1 < src.length()) {
+                    JSONObject next = src.getJSONObject(i + 1);
+                    double nv = next.getDouble("v");
+                    long nt = next.getLong("t");
+                    if (Math.abs(nv - v) < 1e-9) continue;   // valor repetido: ya lo cubre el colapso
+                }
+                // ¿el punto ANTERIOR es un vaivén? (vuelve al valor de dos puntos antes)
+                if (out.length() >= 2 && i + 1 < src.length()) {
+                    JSONObject prev2 = out.getJSONObject(out.length() - 2);
+                    JSONObject next = src.getJSONObject(i + 1);
+                    if (Math.abs(prev2.getDouble("v") - next.getDouble("v")) < 1e-9
+                            && (next.getLong("t") - t) < debounceMs) {
+                        out.remove(out.length() - 1);         // se cae el transitorio
+                        out.put(o);                           // y el valor vuelve al anterior
+                        continue;
+                    }
+                }
+                out.put(o);
+            }
+        } catch (Exception ignored) { }
+        return out;
     }
 
     // ¿La serie local tiene algún cambio que la nube todavía no tiene?
@@ -5245,6 +5658,17 @@ public class MainActivity extends Activity {
             f.setMinimumFractionDigits(2);
         }
         return f.format(v);
+    }
+
+    // "9 nov" o "9 nov 15:30" según el tamaño de la ventana
+    private String fmtDay(long t) {
+        try {
+            long dias = (System.currentTimeMillis() - t) / 86400000L;
+            if (dias <= 2) return new SimpleDateFormat("d MMM HH:mm", new Locale("es", "VE")).format(new Date(t));
+            return new SimpleDateFormat("d MMM", new Locale("es")).format(new Date(t));
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private double parseAmount(String s) {

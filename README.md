@@ -8,8 +8,8 @@
 
 Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 
-[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.11-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
-[![Versión](https://img.shields.io/badge/versión-3.0.11-success?style=flat-square)](../../releases)
+[![Descargar APK](https://img.shields.io/badge/Descargar-APK_v3.0.12-0A84FF?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest)
+[![Versión](https://img.shields.io/badge/versión-3.0.12-success?style=flat-square)](../../releases)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#)
 [![Sin anuncios](https://img.shields.io/badge/100%25-sin_anuncios-orange?style=flat-square)](#)
 
@@ -23,7 +23,7 @@ Dólar BCV · Dólar paralelo · Euro BCV · USDT Binance P2P
 |---|---|
 | 📊 **Tasas en vivo** | Dólar BCV, dólar paralelo, euro BCV y USDT Binance P2P, con variación diaria |
 | ⏱ **Próxima tasa BCV** | Cuenta regresiva a la publicación estimada (3:30 PM, día hábil) con búsqueda automática y respaldo directo del BCV |
-| 📈 **Gráficas** | Historial de cambios de tasa con rangos 7 d / 1 m / 3 m / Todo, variación real del período y trazado en escalones |
+| 📈 **Gráficas** | Eje temporal real (se ve cuánto se mantiene cada tasa), variación del período, color por tramo, barra de navegación y exploración con pellizco |
 | 🔁 **Conversor** | USD/EUR/USDT ⇄ Bs. en tiempo real, invertible, chips de montos rápidos, resultado copiable |
 | 💳 **Perfiles de pago** | Pago móvil, banco, Binance y Zelle — con exportar/importar respaldo JSON |
 | 📤 **Compartir con marca** | Tarjetas con el logo real para tasas, conversiones o perfiles (WhatsApp/Telegram) |
