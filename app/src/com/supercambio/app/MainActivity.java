@@ -89,6 +89,7 @@ import java.util.TimeZone;
 public class MainActivity extends Activity {
 
     private static final String PREFS = "supercambio";
+    private static final String BSU = "\u00A0Bs.";
     private static final String SYNC_KEY = "sc7a9f2d4c8e6b1a3";
     private static final String SYNC_READ = "https://textdb.online/" + SYNC_KEY + "/data.txt";
     private static final String SYNC_WRITE = "https://textdb.online/update";
@@ -184,6 +185,10 @@ public class MainActivity extends Activity {
         accentIdx = p.getInt("accent_idx", 0);
         langEn = p.getBoolean("lang_en", false);
         widgetClear = p.getBoolean("widget_clear", false);
+        // Anti-flash: usar el fondo del tema guardado desde el primer frame
+        try {
+            getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(col("page_bg")));
+        } catch (Exception ignored) { }
         updTag = p.getString("upd_tag", "");
         updUrl = p.getString("upd_url", "");
         updNotes = p.getString("upd_notes", "");
@@ -272,8 +277,13 @@ public class MainActivity extends Activity {
             w.setNavigationBarColor(col("page_bg"));
             View deco = w.getDecorView();
             int flags = deco.getSystemUiVisibility();
-            if (!isDark()) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            else flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (!isDark()) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                if (Build.VERSION.SDK_INT >= 26) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            } else {
+                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                if (Build.VERSION.SDK_INT >= 26) flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            }
             deco.setSystemUiVisibility(flags);
         } catch (Exception ignored) { }
     }
@@ -314,7 +324,44 @@ public class MainActivity extends Activity {
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
         t.setTextColor(color);
         t.setTypeface(bold ? TF_BOLD : TF_REG);
+        tnum(t);
         return t;
+    }
+
+    // Números tabulares: las cifras no "bailan" al actualizarse (Inter soporta tnum)
+    private void tnum(TextView t) {
+        try { t.setFontFeatureSettings("tnum"); } catch (Exception ignored) { }
+    }
+
+    // Botón de icono con área táctil de 48dp (icono visual de 38dp)
+    private FrameLayout iconBtn(int iconRes, String desc, View.OnClickListener click) {
+        FrameLayout wrap = new FrameLayout(this);
+        ImageView iv = new ImageView(this);
+        iv.setImageResource(iconRes);
+        iv.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
+        iv.setBackground(rounded(col("input_bg"), 20));
+        iv.setPadding(dp(9), dp(9), dp(9), dp(9));
+        FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER);
+        wrap.addView(iv, ilp);
+        wrap.setClickable(true);
+        wrap.setFocusable(true);
+        wrap.setContentDescription(desc);
+        wrap.setOnClickListener(click);
+        pressScale(wrap);
+        return wrap;
+    }
+
+    // Fondo con ripple sutil (respeta el radio de la tarjeta)
+    private android.graphics.drawable.Drawable ripple(int contentColor, float radiusDp) {
+        int rc = isDark() ? 0x26FFFFFF : 0x1F000000;
+        try {
+            return new android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(rc),
+                    rounded(contentColor, radiusDp),
+                    rounded(0xFFFFFFFF, radiusDp));
+        } catch (Exception e) {
+            return rounded(contentColor, radiusDp);
+        }
     }
 
     // tvIos: igual que tv — letras SIEMPRE en Inter y los emojis con Apple Emoji
@@ -585,6 +632,7 @@ public class MainActivity extends Activity {
             item.setOrientation(LinearLayout.VERTICAL);
             item.setGravity(Gravity.CENTER);
             item.setClickable(true);
+            item.setBackground(ripple(Color.TRANSPARENT, 20));
             final int idx = i;
             item.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { selectTab(idx); }
@@ -1218,7 +1266,7 @@ public class MainActivity extends Activity {
             LinearLayout card = new LinearLayout(MainActivity.this);
             card.setOrientation(LinearLayout.HORIZONTAL);
             card.setGravity(Gravity.CENTER_VERTICAL);
-            card.setBackground(rounded(col("card_bg"), 18));
+            card.setBackground(ripple(col("card_bg"), 18));
             card.setPadding(dp(16), dp(14), dp(16), dp(14));
 
             TextView badge = tv(PAY_TYPES[t][2], 14, true, Color.WHITE);
@@ -1248,27 +1296,17 @@ public class MainActivity extends Activity {
             card.addView(col, clp);
 
             // Botón QR: comparte el perfil como código QR escaneable
-            ImageView qb = new ImageView(MainActivity.this);
-            qb.setImageResource(R.drawable.ic_qr);
-            qb.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
-            qb.setBackground(rounded(col("input_bg"), 20));
-            qb.setPadding(dp(9), dp(9), dp(9), dp(9));
-            qb.setOnClickListener(new View.OnClickListener() {
+            View qb = iconBtn(R.drawable.ic_qr, S("Compartir QR", "Share QR"), new View.OnClickListener() {
                 public void onClick(View vv) { shareQr(idx); }
             });
-            card.addView(qb, new LinearLayout.LayoutParams(dp(38), dp(38)));
-            ((LinearLayout.LayoutParams) qb.getLayoutParams()).setMargins(0, 0, dp(8), 0);
+            card.addView(qb, new LinearLayout.LayoutParams(dp(44), dp(44)));
+            ((LinearLayout.LayoutParams) qb.getLayoutParams()).setMargins(0, 0, dp(2), 0);
 
             // Botón compartir: genera imagen con logo y nombre de la app
-            ImageView sh = new ImageView(MainActivity.this);
-            sh.setImageResource(R.drawable.ic_share);
-            sh.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
-            sh.setBackground(rounded(col("input_bg"), 20));
-            sh.setPadding(dp(9), dp(9), dp(9), dp(9));
-            sh.setOnClickListener(new View.OnClickListener() {
+            View sh = iconBtn(R.drawable.ic_share, S("Compartir perfil", "Share profile"), new View.OnClickListener() {
                 public void onClick(View vv) { shareProfile(idx); }
             });
-            card.addView(sh, new LinearLayout.LayoutParams(dp(38), dp(38)));
+            card.addView(sh, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
             card.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View view) { showEdit(t, idx); }
@@ -1546,10 +1584,10 @@ public class MainActivity extends Activity {
             return;
         }
         StringBuilder sb = new StringBuilder();
-        if (bcvUsd > 0) sb.append(S("Dólar BCV", "BCV Dollar")).append(": ").append(fmt(bcvUsd)).append(" Bs.\n");
-        if (paralelo > 0) sb.append(S("Dólar paralelo", "Parallel dollar")).append(": ").append(fmt(paralelo)).append(" Bs.\n");
-        if (bcvEur > 0) sb.append(S("Euro BCV", "BCV Euro")).append(": ").append(fmt(bcvEur)).append(" Bs.\n");
-        if (usdt > 0) sb.append("USDT: ").append(fmt(usdt)).append(" Bs.\n");
+        if (bcvUsd > 0) sb.append(S("Dólar BCV", "BCV Dollar")).append(": ").append(fmt(bcvUsd)).append(BSU).append("\n");
+        if (paralelo > 0) sb.append(S("Dólar paralelo", "Parallel dollar")).append(": ").append(fmt(paralelo)).append(BSU).append("\n");
+        if (bcvEur > 0) sb.append(S("Euro BCV", "BCV Euro")).append(": ").append(fmt(bcvEur)).append(BSU).append("\n");
+        if (usdt > 0) sb.append("USDT: ").append(fmt(usdt)).append(BSU).append("\n");
         java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(
                 langEn ? "MMM d, HH:mm" : "d MMM, HH:mm",
                 langEn ? new java.util.Locale("en", "US") : new java.util.Locale("es", "VE"));
@@ -1570,10 +1608,10 @@ public class MainActivity extends Activity {
         int secCol = dk ? 0xFF98989F : 0xFF8E8E93;
 
         String[][] rows = new String[4][5]; // nombre | valor | color | badge | fuente
-        rows[0] = new String[]{S("Dólar BCV", "BCV Dollar"), bcvUsd > 0 ? fmt(bcvUsd) + " Bs." : "—", "accent", "USD", "BCV"};
-        rows[1] = new String[]{S("Dólar paralelo", "Parallel dollar"), paralelo > 0 ? fmt(paralelo) + " Bs." : "—", "green", "USD", S("Promedio", "Average")};
-        rows[2] = new String[]{S("Euro BCV", "BCV Euro"), bcvEur > 0 ? fmt(bcvEur) + " Bs." : "—", "purple", "EUR", "BCV"};
-        rows[3] = new String[]{"USDT Binance", usdt > 0 ? fmt(usdt) + " Bs." : "—", "orange", "USDT", "P2P"};
+        rows[0] = new String[]{S("Dólar BCV", "BCV Dollar"), bcvUsd > 0 ? fmt(bcvUsd) + BSU : "—", "accent", "USD", "BCV"};
+        rows[1] = new String[]{S("Dólar paralelo", "Parallel dollar"), paralelo > 0 ? fmt(paralelo) + BSU : "—", "green", "USD", S("Promedio", "Average")};
+        rows[2] = new String[]{S("Euro BCV", "BCV Euro"), bcvEur > 0 ? fmt(bcvEur) + BSU : "—", "purple", "EUR", "BCV"};
+        rows[3] = new String[]{"USDT Binance", usdt > 0 ? fmt(usdt) + BSU : "—", "orange", "USDT", "P2P"};
 
         int W = 1000, pad = 56, headH = 200, rowH = 122, footH = 130;
         int H = pad + headH + 36 + rowH * 4 + footH;
@@ -1770,7 +1808,8 @@ public class MainActivity extends Activity {
 
         void setValueAnimated(String s) {
             setTextAnimated(value, s);
-            num = s.endsWith(" Bs.") ? s.substring(0, s.length() - 4) : s;
+            String plain = s.replace('\u00A0', ' ');
+            num = plain.endsWith(" Bs.") ? plain.substring(0, plain.length() - 4) : plain;
         }
 
         void setPill(double prevV, double v) {
@@ -1804,6 +1843,7 @@ public class MainActivity extends Activity {
     private class PageRates {
         ScrollView root;
         TextView status;
+        ProgressBar statusSpin;
         RateCard usd, eur, usdtc, parc;
 
         LinearLayout nextBox;
@@ -1842,29 +1882,31 @@ public class MainActivity extends Activity {
             status = tvIos(S("⏳ Sin datos todavía", "⏳ No data yet"), 13, false, col("text_secondary"));
             statusRow.addView(status, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
+            statusSpin = new ProgressBar(MainActivity.this);
+            statusSpin.setIndeterminate(true);
+            statusSpin.setVisibility(View.GONE);
+            LinearLayout.LayoutParams splp = new LinearLayout.LayoutParams(dp(16), dp(16));
+            splp.setMargins(0, 0, dp(8), 0);
+            statusRow.addView(statusSpin, 0, splp);
+            if (Build.VERSION.SDK_INT >= 21) {
+                try {
+                    statusSpin.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(col("accent")));
+                } catch (Exception ignored) { }
+            }
+
             // Copiar todas las tasas de golpe
-            ImageView copyBtn = new ImageView(MainActivity.this);
-            copyBtn.setImageResource(R.drawable.ic_copy);
-            copyBtn.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
-            copyBtn.setBackground(rounded(col("input_bg"), 20));
-            copyBtn.setPadding(dp(9), dp(9), dp(9), dp(9));
-            copyBtn.setOnClickListener(new View.OnClickListener() {
+            View copyBtn = iconBtn(R.drawable.ic_copy, S("Copiar tasas", "Copy rates"), new View.OnClickListener() {
                 public void onClick(View v) { copyAllRates(); }
             });
-            statusRow.addView(copyBtn, new LinearLayout.LayoutParams(dp(38), dp(38)));
-            ((LinearLayout.LayoutParams) copyBtn.getLayoutParams()).setMargins(0, 0, dp(10), 0);
+            statusRow.addView(copyBtn, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            ((LinearLayout.LayoutParams) copyBtn.getLayoutParams()).setMargins(0, 0, dp(4), 0);
 
             // Compartir tasas como imagen con marca
-            ImageView shareBtn = new ImageView(MainActivity.this);
-            shareBtn.setImageResource(R.drawable.ic_share);
-            shareBtn.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
-            shareBtn.setBackground(rounded(col("input_bg"), 20));
-            shareBtn.setPadding(dp(9), dp(9), dp(9), dp(9));
-            shareBtn.setOnClickListener(new View.OnClickListener() {
+            View shareBtn = iconBtn(R.drawable.ic_share, S("Compartir tasas", "Share rates"), new View.OnClickListener() {
                 public void onClick(View v) { shareRates(); }
             });
-            statusRow.addView(shareBtn, new LinearLayout.LayoutParams(dp(38), dp(38)));
-            ((LinearLayout.LayoutParams) shareBtn.getLayoutParams()).setMargins(0, 0, dp(10), 0);
+            statusRow.addView(shareBtn, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            ((LinearLayout.LayoutParams) shareBtn.getLayoutParams()).setMargins(0, 0, dp(4), 0);
 
             Button refreshBtn = new Button(MainActivity.this);
             refreshBtn.setText(S("Actualizar", "Refresh"));
@@ -2156,16 +2198,16 @@ public class MainActivity extends Activity {
         }
 
         void apply() {
-            usd.setValueAnimated(bcvUsd > 0 ? fmt(bcvUsd) + " Bs." : "—");
-            eur.setValueAnimated(bcvEur > 0 ? fmt(bcvEur) + " Bs." : "—");
-            usdtc.setValueAnimated(usdt > 0 ? fmt(usdt) + " Bs." : "—");
-            parc.setValueAnimated(paralelo > 0 ? fmt(paralelo) + " Bs." : "—");
+            usd.setValueAnimated(bcvUsd > 0 ? fmt(bcvUsd) + BSU : "—");
+            eur.setValueAnimated(bcvEur > 0 ? fmt(bcvEur) + BSU : "—");
+            usdtc.setValueAnimated(usdt > 0 ? fmt(usdt) + BSU : "—");
+            parc.setValueAnimated(paralelo > 0 ? fmt(paralelo) + BSU : "—");
 
             SimpleDateFormat f = new SimpleDateFormat("d MMM · HH:mm 'VET'", new Locale("es"));
-            usd.date.setText(bcvUsd > 0 ? (tUsd > 0 ? "Dato del " + f.format(new Date(tUsd)) : "1 USD = " + fmt(bcvUsd) + " Bs.") : "Esperando datos…");
-            eur.date.setText(bcvEur > 0 ? (tEur > 0 ? "Dato del " + f.format(new Date(tEur)) : "1 EUR = " + fmt(bcvEur) + " Bs.") : "Esperando datos…");
-            usdtc.date.setText(usdt > 0 ? (tUsdt > 0 ? "Binance P2P · " + f.format(new Date(tUsdt)) : "1 USDT = " + fmt(usdt) + " Bs.") : "Esperando datos…");
-            parc.date.setText(paralelo > 0 ? (tPar > 0 ? "Dato del " + f.format(new Date(tPar)) : "1 USD = " + fmt(paralelo) + " Bs.") : "Esperando datos…");
+            usd.date.setText(bcvUsd > 0 ? (tUsd > 0 ? "Dato del " + f.format(new Date(tUsd)) : "1 USD = " + fmt(bcvUsd) + BSU) : "Esperando datos…");
+            eur.date.setText(bcvEur > 0 ? (tEur > 0 ? "Dato del " + f.format(new Date(tEur)) : "1 EUR = " + fmt(bcvEur) + BSU) : "Esperando datos…");
+            usdtc.date.setText(usdt > 0 ? (tUsdt > 0 ? "Binance P2P · " + f.format(new Date(tUsdt)) : "1 USDT = " + fmt(usdt) + BSU) : "Esperando datos…");
+            parc.date.setText(paralelo > 0 ? (tPar > 0 ? "Dato del " + f.format(new Date(tPar)) : "1 USD = " + fmt(paralelo) + BSU) : "Esperando datos…");
 
             usd.setPill(prevUsd, bcvUsd);
             eur.setPill(prevEur, bcvEur);
@@ -2173,6 +2215,21 @@ public class MainActivity extends Activity {
             parc.setPill(prevPar, paralelo);
 
             if (nextExpanded) updateCountdown();
+        }
+
+        void setBusy(boolean b) {
+            if (statusSpin == null) return;
+            if (b) {
+                if (statusSpin.getVisibility() != View.VISIBLE) {
+                    statusSpin.setVisibility(View.VISIBLE);
+                    statusSpin.setAlpha(0f);
+                    statusSpin.animate().alpha(1f).setDuration(150).start();
+                }
+            } else {
+                statusSpin.animate().alpha(0f).setDuration(150).withEndAction(new Runnable() {
+                    public void run() { statusSpin.setVisibility(View.GONE); statusSpin.setAlpha(1f); }
+                }).start();
+            }
         }
     }
 
@@ -2412,6 +2469,7 @@ public class MainActivity extends Activity {
         private Paint scrD = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint hs = new Paint(Paint.ANTI_ALIAS_FLAG);
         private Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint halo = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         ChartView() {
             super(MainActivity.this);
@@ -2427,6 +2485,7 @@ public class MainActivity extends Activity {
             txt.setColor(col("text_secondary"));
             txt.setTextSize(dp(10.5f));
             txt.setTypeface(TF_REG);
+            try { txt.setFontFeatureSettings("tnum"); } catch (Exception ignored) { }
             lblB.setColor(col("text_secondary"));
             lblB.setTextSize(dp(11.5f));
             lblB.setTypeface(TF_BOLD);
@@ -2436,10 +2495,15 @@ public class MainActivity extends Activity {
             scrD.setColor(col("text_secondary"));
             scrD.setTextSize(dp(10f));
             scrD.setTypeface(TF_REG);
+            try { scrD.setFontFeatureSettings("tnum"); } catch (Exception ignored) { }
+            try { scrV.setFontFeatureSettings("tnum"); } catch (Exception ignored) { }
+            try { lblB.setFontFeatureSettings("tnum"); } catch (Exception ignored) { }
             hs.setStyle(Paint.Style.STROKE);
             hs.setStrokeWidth(dp(1f));
             hs.setColor(col("text_secondary"));
             hs.setAlpha(70);
+            halo.setStyle(Paint.Style.STROKE);
+            halo.setStrokeWidth(dp(1.5f));
 
             scaleDet = new ScaleGestureDetector(MainActivity.this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
                 public boolean onScale(ScaleGestureDetector d) {
@@ -2739,6 +2803,8 @@ public class MainActivity extends Activity {
             if (iEnd < iA) iEnd = iA;
             float xEnd = padL + usableW * ((iEnd - startF) / win);
             float yEnd = padT + usableH * (1f - (vals[iEnd] - ymin) / yr);
+            halo.setColor(Color.argb(70, Color.red(trend), Color.green(trend), Color.blue(trend)));
+            canvas.drawCircle(xEnd, yEnd, dp(7.5f), halo);
             dot.setColor(Color.WHITE);
             canvas.drawCircle(xEnd, yEnd, dp(4.5f), dot);
             dot.setColor(trend);
@@ -2914,7 +2980,7 @@ public class MainActivity extends Activity {
             result.setClickable(true);
             result.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    String t = result.getText().toString();
+                    String t = result.getText().toString().replace('\u00A0', ' ');
                     if (t.endsWith(" Bs.")) t = t.substring(0, t.length() - 4);
                     copyClip("Resultado", t, result);
                 }
@@ -3078,9 +3144,9 @@ public class MainActivity extends Activity {
                     double res = amt * rate;
                     if (hasFee) {
                         double feeAmt = res * fee / 100.0;
-                        setResultAnimated(fmt(res - feeAmt) + " Bs.");
+                        setResultAnimated(fmt(res - feeAmt) + BSU);
                     } else {
-                        setResultAnimated(fmt(res) + " Bs.");
+                        setResultAnimated(fmt(res) + BSU);
                     }
                 } else {
                     setResultAnimated("—");
@@ -3089,7 +3155,7 @@ public class MainActivity extends Activity {
             if (hasFee && feeDetail != null) {
                 double res = invert ? amt / rate : amt * rate;
                 double feeAmt = res * fee / 100.0;
-                String unit = invert ? " " + sym : " Bs.";
+                String unit = invert ? " " + sym : BSU;
                 feeDetail.setText(S("Comisión ", "Fee ") + fmt(fee) + "%: −" + fmt(feeAmt) + unit
                         + S(" · Bruto: ", " · Gross: ") + fmt(res) + unit);
                 feeDetail.setVisibility(View.VISIBLE);
@@ -3124,8 +3190,8 @@ public class MainActivity extends Activity {
             double resVal = invert ? amt / rate : amt * rate;
             double feeAmt = hasFee ? resVal * fee / 100.0 : 0;
             double net = resVal - feeAmt;
-            String unit = invert ? " " + sym : " Bs.";
-            String montoTxt = invert ? fmt(amt) + " Bs." : fmt(amt) + " " + sym;
+            String unit = invert ? " " + sym : BSU;
+            String montoTxt = invert ? fmt(amt) + BSU : fmt(amt) + " " + sym;
             String resTxt = fmt(net) + unit;
             String tasaTxt = S("Tasa: ", "Rate: ") + fmt(rate) + S(" Bs. por ", " Bs. per ") + sym
                     + " · " + (mode == 2 ? "Binance P2P" : "BCV");
@@ -3580,7 +3646,8 @@ public class MainActivity extends Activity {
     }
 
     private TextView sectionLabel(String s) {
-        TextView t = tv(s.toUpperCase(), 13, true, col("text_secondary"));
+        TextView t = tv(s.toUpperCase(), 12, true, col("text_secondary"));
+        try { t.setLetterSpacing(0.08f); } catch (Exception ignored) { }
         t.setPadding(dp(14), dp(22), 0, dp(6));
         return t;
     }
@@ -3761,6 +3828,7 @@ public class MainActivity extends Activity {
 
     private void refresh() {
         pageRates.status.setText(brandSpan(S("Actualizando…", "Updating…")));
+        pageRates.setBusy(true);
         new Thread(new Runnable() {
             public void run() {
                 double nUsd = 0, nEur = 0, nUsdt = 0, nPar = 0;
@@ -3834,6 +3902,7 @@ public class MainActivity extends Activity {
                         SimpleDateFormat f = new SimpleDateFormat("d MMM, HH:mm", new Locale("es"));
                         if (ok) pageRates.status.setText(TextUtils.concat(brandSpan(S("✅ Actualizado: ", "✅ Updated: ")), f.format(new Date())));
                         else pageRates.status.setText(brandSpan(S("📴 Sin conexión · mostrando últimos datos", "📴 Offline · showing last data")));
+                        pageRates.setBusy(false);
                         syncSharedHist(false);
                     }
                 });
@@ -4571,14 +4640,20 @@ public class MainActivity extends Activity {
 
     private String fmt(double v) {
         NumberFormat f = NumberFormat.getNumberInstance(new Locale("es", "VE"));
-        f.setMaximumFractionDigits(4);
-        f.setMinimumFractionDigits(2);
+        double a = Math.abs(v);
+        if (a > 0 && a < 1) {
+            f.setMaximumFractionDigits(4);
+            f.setMinimumFractionDigits(4);
+        } else {
+            f.setMaximumFractionDigits(2);
+            f.setMinimumFractionDigits(2);
+        }
         return f.format(v);
     }
 
     private double parseAmount(String s) {
         try {
-            String t = s.trim();
+            String t = s.replace('\u00A0', ' ').trim();
             if (t.length() == 0) return 0;
             // Acepta "899,30" y "1.054,60" (miles con punto + decimal con coma)
             if (t.indexOf(',') >= 0) t = t.replace(".", "").replace(',', '.');

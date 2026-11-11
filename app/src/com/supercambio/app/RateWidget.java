@@ -26,9 +26,7 @@ public class RateWidget extends AppWidgetProvider {
             double par = Double.longBitsToDouble(p.getLong("par", 0));
             double usdt = Double.longBitsToDouble(p.getLong("usdt", 0));
             long ts = p.getLong("tsUsd", 0);
-            String t = ts > 0
-                    ? new SimpleDateFormat("d MMM · HH:mm", new Locale("es", "VE")).format(new Date(ts))
-                    : "—";
+            String t = rel(ts);
 
             AppWidgetManager awm = AppWidgetManager.getInstance(ctx);
             Intent it = new Intent(ctx, MainActivity.class);
@@ -44,7 +42,7 @@ public class RateWidget extends AppWidgetProvider {
             rv.setTextViewText(R.id.w_usd, usd > 0 ? f(usd) : "—");
             rv.setTextViewText(R.id.w_par, par > 0 ? f(par) : "—");
             rv.setTextViewText(R.id.w_eur, eur > 0 ? f(eur) : "—");
-            rv.setTextViewText(R.id.w_time, "Actualizado: " + t);
+            rv.setTextViewText(R.id.w_time, ts > 0 ? "Actualizado " + t : "Actualizado: —");
             rv.setOnClickPendingIntent(R.id.widget_root, pi);
             awm.updateAppWidget(new ComponentName(ctx, RateWidget.class), rv);
 
@@ -61,7 +59,7 @@ public class RateWidget extends AppWidgetProvider {
             mv.setInt(R.id.wm_root, "setBackgroundResource", bg);
             mv.setTextViewText(R.id.wm_usd, usd > 0 ? f(usd) : "—");
             mv.setTextViewText(R.id.wm_par, par > 0 ? f(par) : "—");
-            mv.setTextViewText(R.id.wm_time, "Actualizado: " + t);
+            mv.setTextViewText(R.id.wm_time, ts > 0 ? "Actualizado " + t : "Actualizado: —");
             mv.setOnClickPendingIntent(R.id.wm_root, pi);
             awm.updateAppWidget(new ComponentName(ctx, WidgetSmall.class), mv);
 
@@ -72,7 +70,7 @@ public class RateWidget extends AppWidgetProvider {
             lv.setTextViewText(R.id.wl_par, par > 0 ? f(par) : "—");
             lv.setTextViewText(R.id.wl_usdt, usdt > 0 ? f(usdt) : "—");
             lv.setTextViewText(R.id.wl_eur, eur > 0 ? f(eur) : "—");
-            lv.setTextViewText(R.id.wl_time, "Actualizado: " + t);
+            lv.setTextViewText(R.id.wl_time, ts > 0 ? "Actualizado " + t : "Actualizado: —");
             lv.setOnClickPendingIntent(R.id.wl_root, pi);
             awm.updateAppWidget(new ComponentName(ctx, WidgetLarge.class), lv);
         } catch (Exception ignored) { }
@@ -80,5 +78,20 @@ public class RateWidget extends AppWidgetProvider {
 
     private static String f(double v) {
         return String.format(new Locale("es", "VE"), "%,.2f", v);
+    }
+
+    // Tiempo relativo compacto para el pie del widget
+    private static String rel(long ts) {
+        if (ts <= 0) return "—";
+        long diff = System.currentTimeMillis() - ts;
+        if (diff < 0) diff = 0;
+        if (diff < 60000L) return "ahora";
+        long min = diff / 60000L;
+        if (min < 60) return "hace " + min + " min";
+        long h = min / 60;
+        if (h < 24) return "hace " + h + " h";
+        long d = h / 24;
+        if (d < 7) return "hace " + d + " d";
+        return new SimpleDateFormat("d MMM", new Locale("es", "VE")).format(new Date(ts));
     }
 }
