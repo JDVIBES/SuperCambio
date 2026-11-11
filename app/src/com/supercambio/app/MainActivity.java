@@ -382,11 +382,33 @@ public class MainActivity extends Activity {
 
     private CharSequence iconText(int res, String text, int sizeDp, int color) {
         SpannableStringBuilder sb = new SpannableStringBuilder(" ");
-        sb.setSpan(new ImageSpan(iconDrawable(res, sizeDp, color), ImageSpan.ALIGN_BASELINE),
+        sb.setSpan(new CenteredImageSpan(iconDrawable(res, sizeDp, color)),
                 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         sb.append(" ");
         sb.append(brandSpan(text));
         return sb;
+    }
+
+    private static class CenteredImageSpan extends ImageSpan {
+        CenteredImageSpan(Drawable d) {
+            super(d);
+        }
+
+        @Override
+        public void draw(Canvas canvas, CharSequence text, int start, int end,
+                         float x, int top, int y, int bottom, Paint paint) {
+            Drawable d = getDrawable();
+            if (d == null) {
+                super.draw(canvas, text, start, end, x, top, y, bottom, paint);
+                return;
+            }
+            Paint.FontMetricsInt fm = paint.getFontMetricsInt();
+            int transY = y + (fm.ascent + fm.descent - d.getBounds().height()) / 2;
+            canvas.save();
+            canvas.translate(x, transY);
+            d.draw(canvas);
+            canvas.restore();
+        }
     }
 
     private TextView tvIcon(int res, String text, float sizeSp, boolean bold, int color, int iconDp) {
@@ -1367,7 +1389,7 @@ public class MainActivity extends Activity {
             box.addView(list);
 
             empty = tvIos("", 13, false, col("text_secondary"));
-            empty.setText(iconText(R.drawable.ic_card, S("Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 18, col("text_secondary")));
+            empty.setText(iconText(R.drawable.ic_card, S("Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 16, col("text_secondary")));
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(40), 0, 0);
             box.addView(empty);
@@ -1391,9 +1413,9 @@ public class MainActivity extends Activity {
                 shown++;
             }
             if (shown == 0 && q.length() > 0) {
-                empty.setText(iconText(R.drawable.ic_search, S("Sin resultados para tu búsqueda.", "No results for your search."), 18, col("text_secondary")));
+                empty.setText(iconText(R.drawable.ic_search, S("Sin resultados para tu búsqueda.", "No results for your search."), 16, col("text_secondary")));
             } else {
-                empty.setText(iconText(R.drawable.ic_card, S("Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 18, col("text_secondary")));
+                empty.setText(iconText(R.drawable.ic_card, S("Aún no tienes perfiles.\nAgrega tu Pago móvil, cuenta de banco, Binance o Zelle para tenerlos a mano.", "No profiles yet.\nAdd your mobile payment, bank account, Binance or Zelle to keep them handy."), 16, col("text_secondary")));
             }
             empty.setVisibility(shown == 0 ? View.VISIBLE : View.GONE);
             nudgeBlur();
@@ -4069,6 +4091,7 @@ public class MainActivity extends Activity {
         chev.setImageResource(R.drawable.ic_chevron_right);
         chev.setColorFilter(col("text_secondary"), android.graphics.PorterDuff.Mode.SRC_IN);
         LinearLayout.LayoutParams chLp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        chLp.gravity = Gravity.CENTER_VERTICAL;
         chLp.setMargins(dp(8), 0, 0, 0);
         row.addView(chev, chLp);
         row.setClickable(true);
@@ -4089,7 +4112,9 @@ public class MainActivity extends Activity {
         ImageView check = new ImageView(this);
         check.setImageResource(R.drawable.ic_check_circle);
         check.setColorFilter(col("green"), android.graphics.PorterDuff.Mode.SRC_IN);
-        row.addView(check, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        LinearLayout.LayoutParams chkLp = new LinearLayout.LayoutParams(dp(18), dp(18));
+        chkLp.gravity = Gravity.CENTER_VERTICAL;
+        row.addView(check, chkLp);
     }
 
     // ================= RED Y REFRESCO =================
